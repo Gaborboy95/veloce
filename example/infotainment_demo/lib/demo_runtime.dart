@@ -26,6 +26,18 @@ final class DemoRuntime {
         CanAccessGrant(
           readFilters: [CanFilter(bus: 'comfort', id: 0x280, mask: 0x7ff)],
         ),
+      )
+      ..setGrant(
+        'com.veloce.phaeton.gp3.comfort',
+        CanAccessGrant(
+          readFilters: [CanFilter(bus: 'comfort')],
+        ),
+      )
+      ..setGrant(
+        'com.veloce.phaeton.gp3.infotainment',
+        CanAccessGrant(
+          readFilters: [CanFilter(bus: 'infotainment')],
+        ),
       );
     final canProvider = InMemoryCanProvider(writesEnabled: false);
     final nativePath = Platform.environment['IVI_LUA_LIBRARY'];
@@ -83,3 +95,4 @@ final class DemoRuntime {
         .absolute;
   }
 }
+

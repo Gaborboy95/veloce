@@ -1,4 +1,4 @@
-# IVI Lua runtime for Flutter
+# Veloce Lua runtime for Flutter
 
 A modular Lua 5.4 plugin runtime for Flutter-based automotive infotainment
 hosts. Plugins are ordinary directories discovered at runtime, and each loaded
