@@ -63,7 +63,7 @@ abstract interface class CanAuthorizationPolicy {
   void removeOwner(String ownerId);
 }
 
-/// Configurable bus/ID/mask grants with a sliding one-second write-rate limit.
+/// Configurable bus/ID-set/mask grants with a sliding write-rate limit.
 final class ConfigurableCanAuthorizationPolicy
     implements CanAuthorizationPolicy {
   final Map<String, CanAccessGrant> _grants = {};

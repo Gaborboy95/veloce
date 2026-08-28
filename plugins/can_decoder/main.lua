@@ -19,7 +19,7 @@ end
 function on_load()
   can.subscribe({
     bus = "comfort",
-    id = 0x280,
+    ids = { 0x280 },
     mask = 0x7FF,
   }, decode_engine_rpm)
 

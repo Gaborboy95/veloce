@@ -146,6 +146,81 @@ void main() {
           PluginState.running);
     });
 
+    test('CAN API accepts wildcard and multiple-ID subscription filters',
+        () async {
+      final root = await Directory.systemTemp.createTemp('ivi-can-api-test-');
+      final factory = _FakeRuntimeFactory();
+      final behavior = _Behavior(
+        onLoad: (runtime, _) {
+          PluginCallbackRef callback(int callbackId) => PluginCallbackRef(
+                pluginId: runtime.manifest.id,
+                generation: runtime.generation,
+                callbackId: callbackId,
+              );
+
+          runtime.callApi(
+            'can',
+            'subscribe',
+            [
+              const PluginApiDataArgument({
+                'bus': 'comfort',
+                'extended': false,
+              }),
+              PluginApiCallbackArgument(callback(1)),
+            ],
+          );
+          runtime.callApi(
+            'can',
+            'subscribe',
+            [
+              const PluginApiDataArgument({
+                'bus': 'powertrain',
+                'ids': [0x100, 0x200],
+              }),
+              PluginApiCallbackArgument(callback(2)),
+            ],
+          );
+        },
+      );
+      factory.behaviors.add(behavior);
+      final canProvider = InMemoryCanProvider();
+      final manager = PluginManager(
+        pluginRoot: root,
+        runtimeFactory: factory,
+        canProvider: canProvider,
+      );
+      addTearDown(() async {
+        await manager.close();
+        await canProvider.close();
+        await root.delete(recursive: true);
+      });
+
+      await manager.loadPlugin(
+        _source(root, permissions: const ['can.read']),
+      );
+      expect(
+        canProvider
+            .inject(CanFrame(bus: 'comfort', id: 0x555, data: const []))
+            .matchedSubscriptions,
+        1,
+      );
+      expect(
+        canProvider
+            .inject(CanFrame(bus: 'powertrain', id: 0x200, data: const []))
+            .matchedSubscriptions,
+        1,
+      );
+      expect(
+        canProvider
+            .inject(CanFrame(bus: 'powertrain', id: 0x201, data: const []))
+            .matchedSubscriptions,
+        0,
+      );
+      await canProvider.flush();
+
+      expect(behavior.callbackInvocations, 2);
+    });
+
     test('candidate API resources are rolled back when on_load fails',
         () async {
       final root = await Directory.systemTemp.createTemp('ivi-rollback-test-');

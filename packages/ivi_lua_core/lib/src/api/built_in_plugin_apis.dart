@@ -143,12 +143,7 @@ final class BuiltInPluginApis {
             handler: (call) {
               call.requireArgumentCount(2);
               final value = _stringMap(call.data(0), call);
-              final filter = CanFilter(
-                bus: _field<String>(value, 'bus', call),
-                id: _field<int>(value, 'id', call),
-                mask: _field<int>(value, 'mask', call),
-                extended: _optionalField<bool>(value, 'extended', call),
-              );
+              final filter = _canFilter(value, call);
               return _resolveScope(call).subscribeCan(filter, call.callback(1));
             },
           ),
@@ -362,6 +357,38 @@ final class BuiltInPluginApis {
   ) {
     if (!value.containsKey(name)) return null;
     return _field<T>(value, name, call);
+  }
+
+  static CanFilter _canFilter(
+    Map<String, Object?> value,
+    PluginApiCall call,
+  ) {
+    final rawIds = value['ids'];
+    List<int>? ids;
+    if (value.containsKey('ids')) {
+      if (rawIds is! List<Object?> || rawIds.any((id) => id is! int)) {
+        throw PluginApiException(
+          '${call.namespace}.${call.method} field "ids" must be an array of integers.',
+          pluginId: call.pluginId,
+        );
+      }
+      ids = [for (final id in rawIds) id! as int];
+    }
+
+    try {
+      return CanFilter(
+        bus: _field<String>(value, 'bus', call),
+        id: _optionalField<int>(value, 'id', call),
+        ids: ids,
+        mask: _optionalField<int>(value, 'mask', call),
+        extended: _optionalField<bool>(value, 'extended', call),
+      );
+    } on ArgumentError catch (error) {
+      throw PluginApiException(
+        'Invalid CAN filter: ${error.message}',
+        pluginId: call.pluginId,
+      );
+    }
   }
 
   static String _storageKey(String value, PluginApiCall call) {

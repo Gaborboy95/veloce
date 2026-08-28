@@ -194,7 +194,8 @@ storage       timer
 
 A manifest request is necessary but not sufficient: the host can disable a
 capability or apply a per-plugin authorization policy. CAN additionally supports
-bus/ID/mask grants and maximum write rates. `can.write` is disabled by default.
+bus/ID-set/mask grants and maximum write rates. A filter can select one ID,
+multiple IDs, or all IDs on a bus. `can.write` is disabled by default.
 Unknown capability names fail manifest validation.
 
 Hosts add an API without weakening attribution by registering a namespace of

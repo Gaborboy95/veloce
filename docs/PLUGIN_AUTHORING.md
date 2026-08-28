@@ -112,7 +112,7 @@ receives an underlying Dart object or raw native pointer.
 | `events` | `events.subscribe`, `events.publish` | General structured events. |
 | `vehicle.read` | `vehicle.subscribe` | Abstract signals, independent of CAN. |
 | `vehicle.write` | `vehicle.publish` | Normally granted only to trusted adapters/decoders. |
-| `can.read` | `can.subscribe` | Also constrained by the host's bus/ID/mask grant. |
+| `can.read` | `can.subscribe` | Also constrained by the host's bus/ID-set/mask grant. |
 | `can.write` | `can.send` | Disabled by default; also needs a host grant and rate limit. |
 | `ui.tabs` | tab registration/update/removal | UI is a validated declarative tree. |
 | `ui.notifications` | reserved notification extension | The capability exists; no API v1 notification method is currently exposed. |
@@ -221,8 +221,29 @@ can.subscribe({
 end)
 ```
 
-The provider evaluates `bus`, `id`, `mask`, and optional `extended` before a
-matching frame enters the plugin callback queue. A frame has this shape:
+Omit both `id` and `ids` to receive every identifier on a bus, or use `ids` to
+match any identifier in an array:
+
+```lua
+-- Every standard frame on the comfort bus.
+can.subscribe({
+  bus = "comfort",
+  extended = false,
+}, handle_comfort_frame)
+
+-- Either ID, using the same mask for each candidate.
+can.subscribe({
+  bus = "comfort",
+  ids = { 0x280, 0x281 },
+  mask = 0x7FF,
+}, handle_selected_frame)
+```
+
+`id` and `ids` are mutually exclusive. `mask` is optional and defaults to the
+full standard or extended identifier width. It has no effect when both ID
+fields are omitted. The provider evaluates the bus, ID set, mask, and optional
+`extended` value before a matching frame enters the plugin callback queue. A
+frame has this shape:
 
 ```lua
 {

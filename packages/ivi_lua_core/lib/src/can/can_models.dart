@@ -84,42 +84,86 @@ final class CanFrame {
 final class CanFilter {
   CanFilter({
     required this.bus,
-    required this.id,
-    required this.mask,
+    int? id,
+    Iterable<int>? ids,
+    int? mask,
     this.extended,
-  }) {
+  })  : ids = List.unmodifiable(_normalizeIdentifiers(id, ids)),
+        mask = mask ?? (extended == false ? 0x7ff : 0x1fffffff) {
     if (bus.isEmpty ||
         bus.length > 64 ||
         !RegExp(r'^[A-Za-z0-9_-]+$').hasMatch(bus)) {
       throw ArgumentError.value(bus, 'bus', 'Invalid CAN bus name');
     }
     final maximum = extended == false ? 0x7ff : 0x1fffffff;
-    if (id < 0 || id > maximum) {
-      throw ArgumentError.value(id, 'id', 'Outside CAN identifier range');
+    for (final identifier in this.ids) {
+      if (identifier < 0 || identifier > maximum) {
+        throw ArgumentError.value(
+          identifier,
+          'ids',
+          'Outside CAN identifier range',
+        );
+      }
     }
-    if (mask < 0 || mask > maximum) {
-      throw ArgumentError.value(mask, 'mask', 'Outside CAN mask range');
+    if (this.mask < 0 || this.mask > maximum) {
+      throw ArgumentError.value(
+        this.mask,
+        'mask',
+        'Outside CAN mask range',
+      );
     }
   }
 
   final String bus;
-  final int id;
+  final List<int> ids;
   final int mask;
   final bool? extended;
+
+  /// The identifier for a single-ID filter, otherwise `null`.
+  ///
+  /// Prefer [ids] when handling filters generically. An empty [ids] list is a
+  /// wildcard that accepts every identifier on [bus].
+  int? get id => ids.length == 1 ? ids.single : null;
+
+  bool get matchesAllIds => ids.isEmpty;
 
   bool matches(CanFrame frame) =>
       frame.bus == bus &&
       (extended == null || extended == frame.extended) &&
-      (frame.id & mask) == (id & mask);
+      (matchesAllIds ||
+          ids.any((identifier) => (frame.id & mask) == (identifier & mask)));
 
   /// Whether every frame matched by [other] is also matched by this filter.
   bool covers(CanFilter other) =>
       bus == other.bus &&
       (extended == null || extended == other.extended) &&
-      (other.mask & mask) == mask &&
-      (other.id & mask) == (id & mask);
+      (matchesAllIds ||
+          (!other.matchesAllIds &&
+              other.ids.every(
+                (otherId) => ids.any(
+                  (id) =>
+                      (other.mask & mask) == mask &&
+                      (otherId & mask) == (id & mask),
+                ),
+              )));
+
+  static Iterable<int> _normalizeIdentifiers(
+    int? id,
+    Iterable<int>? ids,
+  ) {
+    if (id != null && ids != null) {
+      throw ArgumentError('Specify either id or ids, not both.');
+    }
+    if (id != null) return [id];
+    return ids == null ? const [] : <int>{...ids};
+  }
 
   @override
-  String toString() => 'CanFilter(bus: $bus, id: 0x${id.toRadixString(16)}, '
-      'mask: 0x${mask.toRadixString(16)}, extended: $extended)';
+  String toString() {
+    final idDescription = matchesAllIds
+        ? '*'
+        : ids.map((id) => '0x${id.toRadixString(16)}').join(', ');
+    return 'CanFilter(bus: $bus, ids: [$idDescription], '
+        'mask: 0x${mask.toRadixString(16)}, extended: $extended)';
+  }
 }
