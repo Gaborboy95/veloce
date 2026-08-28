@@ -1,7 +1,7 @@
-local ivi = require("ivi")
-local log = ivi.log
-local timer = ivi.timer
-local ui = ivi.ui
+local veloce = require("veloce")
+local log = veloce.log
+local timer = veloce.timer
+local ui = veloce.ui
 
 local tab_id = "hello"
 local counter = 0

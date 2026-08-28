@@ -2,8 +2,9 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:ivi_lua_core/ivi_lua_core.dart';
+import 'package:veloce_lua_core/veloce_lua_core.dart';
 
+import 'package:infotainment_demo/can_input.dart';
 import 'package:infotainment_demo/demo_runtime.dart';
 import 'package:infotainment_demo/infotainment_app.dart';
 
@@ -25,6 +26,7 @@ void main() {
     final runtime = DemoRuntime(
       manager: manager,
       canProvider: canProvider,
+      canInput: DemoCanInputController.memory(),
       pluginDirectory: Directory.current,
     );
 

@@ -1,8 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:ivi_lua_core/ivi_lua_core.dart';
-import 'package:ivi_lua_flutter/ivi_lua_flutter.dart';
+import 'package:veloce_lua_core/veloce_lua_core.dart';
+import 'package:veloce_lua_flutter/veloce_lua_flutter.dart';
 
 import 'demo_runtime.dart';
 import 'pages/developer_console_page.dart';
@@ -87,7 +87,7 @@ final class _InfotainmentDemoState extends State<InfotainmentDemo> {
 
     return MaterialApp(
       debugShowCheckedModeBanner: false,
-      title: 'IVI Lua Runtime',
+      title: 'Veloce Lua Runtime',
       theme: ThemeData(
         colorScheme: ColorScheme.fromSeed(
           seedColor: const Color(0xff00a6a6),
@@ -97,7 +97,7 @@ final class _InfotainmentDemoState extends State<InfotainmentDemo> {
       ),
       home: Scaffold(
         appBar: AppBar(
-          title: const Text('IVI Lua Runtime'),
+          title: const Text('Veloce Lua Runtime'),
           actions: [
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
@@ -162,7 +162,7 @@ final class DemoStartupFailure extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  'The IVI Lua demo could not start',
+                  'The Veloce Lua demo could not start',
                   style: TextStyle(fontSize: 28),
                 ),
                 const SizedBox(height: 16),

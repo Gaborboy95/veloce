@@ -1,5 +1,5 @@
 name: infotainment_demo
-description: Desktop demonstration host for the IVI Lua plugin runtime.
+description: Desktop demonstration host for the Veloce Lua plugin runtime.
 publish_to: none
 version: 1.0.0+1
 
@@ -7,14 +7,16 @@ environment:
   sdk: ^3.13.2
 
 dependencies:
+  ffi: ^2.1.4
   flutter:
     sdk: flutter
-  ivi_lua_core:
-    path: ../../packages/ivi_lua_core
-  ivi_lua_flutter:
-    path: ../../packages/ivi_lua_flutter
-  ivi_lua_native:
-    path: ../../packages/ivi_lua_native
+  flutter_libserialport: ^0.6.0
+  veloce_lua_core:
+    path: ../../packages/veloce_lua_core
+  veloce_lua_flutter:
+    path: ../../packages/veloce_lua_flutter
+  veloce_lua_native:
+    path: ../../packages/veloce_lua_native
 
 dev_dependencies:
   flutter_test:
@@ -23,4 +25,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-

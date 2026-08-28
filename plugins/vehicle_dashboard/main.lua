@@ -1,6 +1,6 @@
-local ivi = require("ivi")
-local ui = ivi.ui
-local vehicle = ivi.vehicle
+local veloce = require("veloce")
+local ui = veloce.ui
+local vehicle = veloce.vehicle
 
 local tab_id = "engine_dashboard"
 local engine_rpm = 0

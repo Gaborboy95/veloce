@@ -3,10 +3,11 @@
 #
 
 list(APPEND FLUTTER_PLUGIN_LIST
+  flutter_libserialport
 )
 
 list(APPEND FLUTTER_FFI_PLUGIN_LIST
-  ivi_lua_native
+  veloce_lua_native
 )
 
 set(PLUGIN_BUNDLED_LIBRARIES)

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:ivi_lua_core/ivi_lua_core.dart';
-import 'package:ivi_lua_flutter/ivi_lua_flutter.dart';
+import 'package:veloce_lua_core/veloce_lua_core.dart';
+import 'package:veloce_lua_flutter/veloce_lua_flutter.dart';
 
 final class PluginTabPage extends StatelessWidget {
   const PluginTabPage({

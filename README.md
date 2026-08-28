@@ -7,7 +7,8 @@ namespaced APIs backed by permission checks and structured data.
 
 This repository is an engineering prototype: it establishes the package
 boundaries, safe bridge, lifecycle ownership, transactional reload model,
-declarative Flutter UI, in-memory CAN path, and demo plugins. Read
+declarative Flutter UI, in-memory and example hardware CAN paths, and demo
+plugins. Read
 [Known limitations](#known-limitations) before treating it as a production
 security boundary.
 
@@ -31,10 +32,10 @@ security boundary.
 
 ```text
 packages/
-├── ivi_lua_core/       Pure Dart contracts, models, buses, policy, ownership
+├── veloce_lua_core/       Pure Dart contracts, models, buses, policy, ownership
 │                       registries, loading, watching, and manager foundations
-├── ivi_lua_native/     Lua 5.4 C shim, Dart FFI implementation, sandbox
-└── ivi_lua_flutter/    UI-model validation and Flutter widget construction
+├── veloce_lua_native/     Lua 5.4 C shim, Dart FFI implementation, sandbox
+└── veloce_lua_flutter/    UI-model validation and Flutter widget construction
 
 example/
 └── infotainment_demo/  Flutter desktop host and developer controls
@@ -69,7 +70,7 @@ Flutter host / ivi-homescreen integration
 │   ├── PluginStorageProvider + PluginLogManager
 │   └── per-generation callbacks and timers
 │
-├── ivi_lua_flutter
+├── veloce_lua_flutter
 │   └── validated PluginUiNode → Flutter Widget
 │
 └── PluginScriptRuntime abstraction
@@ -103,13 +104,13 @@ does not change consumer plugins.
 ## Native Lua choice
 
 The runtime builds the official Lua **5.4.9** sources into
-`ivi_lua_native`; it does not require `lua` or `liblua` to be installed on the
+`veloce_lua_native`; it does not require `lua` or `liblua` to be installed on the
 target. CMake pins both the release URL and SHA-256 digest. The resulting native
 library is bundled by the Flutter Linux/Windows plugin build.
 
 Lua is downloaded by CMake's `FetchContent` on the first native build. A
 reproducible offline embedded build can unpack the pinned archive and configure
-with `-DIVI_LUA_SOURCE_DIR=/path/to/lua-5.4.9`; the source archive is not
+with `-DVELOCE_LUA_SOURCE_DIR=/path/to/lua-5.4.9`; the source archive is not
 currently checked into this repository.
 
 [`flutter_embed_lua` 0.0.2](https://pub.dev/packages/flutter_embed_lua) was
@@ -122,7 +123,7 @@ ownership, and a pointer-free replaceable runtime interface. It may suit a
 trusted embedded REPL, but adapting it would still require a private native
 layer for the safety and lifecycle invariants here. This repository therefore
 uses a deliberately small C shim and keeps its FFI types private to
-`ivi_lua_native`.
+`veloce_lua_native`.
 
 ## Plugin format and lifecycle
 
@@ -146,14 +147,14 @@ plugins/com_example_demo/
 ```
 
 ```lua
-local ivi = require("ivi")
+local veloce = require("veloce")
 
 function on_load(previous_state)
-  ivi.log.info("loaded")
+  veloce.log.info("loaded")
 end
 
 function on_unload()
-  ivi.log.info("unloading")
+  veloce.log.info("unloading")
 end
 ```
 
@@ -243,7 +244,7 @@ selected base functions plus the table, string, math, and UTF-8 libraries are
 opened. `dofile`, `loadfile`, `load`, `print`, `warn`, and `collectgarbage` are
 removed; `io`, `os`, `debug`, `package`, coroutine, process/environment access,
 and native module loading are not exposed. `require` accepts only the
-host-provided `ivi` module. Protected calls install instruction-count and
+host-provided `veloce` module. Protected calls install instruction-count and
 monotonic deadline hooks.
 
 The bridge carries only null/nil, bool, integer, finite double, string, arrays,
@@ -292,29 +293,32 @@ flutter run -d windows
 
 Run the demo from the repository checkout (or configure its plugin root) so it
 can find `plugins/`. Its host UI is designed to expose built-in Home, Plugins,
-and Developer Console views alongside Lua-contributed tabs. The fake-CAN control
-injects an `0x280` frame without requiring a real CAN interface.
+and Developer Console views alongside Lua-contributed tabs. The manual CAN
+control injects an `0x280` frame without requiring hardware. The example can
+alternatively read from Linux SocketCAN or a Windows COM-port LAWICEL adapter;
+configuration is documented in the
+[`infotainment_demo` README](example/infotainment_demo/README.md).
 
 The first native build needs network access for the pinned Lua archive unless
-`IVI_LUA_SOURCE_DIR` points at an unpacked Lua 5.4.9 source tree.
+`VELOCE_LUA_SOURCE_DIR` points at an unpacked Lua 5.4.9 source tree.
 
 ## Testing and analysis
 
 There is no root workspace runner, so run checks in each package:
 
 ```bash
-cd packages/ivi_lua_core
+cd packages/veloce_lua_core
 dart pub get
 dart analyze
 dart test
 
-cd ../ivi_lua_native
+cd ../veloce_lua_native
 flutter pub get
 flutter analyze
-# First build the test library; see packages/ivi_lua_native/README.md.
+# First build the test library; see packages/veloce_lua_native/README.md.
 flutter test
 
-cd ../ivi_lua_flutter
+cd ../veloce_lua_flutter
 flutter pub get
 flutter analyze
 flutter test
@@ -327,11 +331,11 @@ flutter build linux
 ```
 
 Use `flutter build windows` instead of the final command on a Windows host.
-Native compile/runtime tests need `build/native/ivi_lua_native` (or an explicit
-`IVI_LUA_LIBRARY`) as described in the native package README. A normal Flutter
+Native compile/runtime tests need `build/native/veloce_lua_native` (or an explicit
+`VELOCE_LUA_LIBRARY`) as described in the native package README. A normal Flutter
 desktop build instead compiles and bundles that library through the FFI plugin.
-The in-memory CAN provider keeps the test suite independent of SocketCAN
-hardware.
+The in-memory CAN provider keeps the test suite independent of SocketCAN and
+serial hardware. LAWICEL parsing is tested with recorded protocol strings.
 
 ## Linux and `ivi-homescreen`
 
@@ -344,7 +348,7 @@ the embedder shuts down.
 
 For a stripped Debian image:
 
-- cross-compile and package `libivi_lua_native.so` with the Flutter application;
+- cross-compile and package `libveloce_lua_native.so` with the Flutter application;
 - do not install or dynamically locate a system `liblua`;
 - keep the plugin and storage roots outside the immutable application image and
   grant only the required Unix permissions;
@@ -371,9 +375,11 @@ For a stripped Debian image:
   isolate. Calls are bounded and serialized but not yet offloaded.
 - Isolates do not contain native crashes; a restricted helper process is the
   appropriate stronger boundary for genuinely hostile plugins.
-- No production SocketCAN provider is included. CAN write policy exists, but
-  the flat manifest schema does not yet express per-plugin bus/ID/rate grants;
-  the host supplies those grants.
+- The example includes read-only SocketCAN and LAWICEL input adapters, but they
+  are not production transport services: reconnect, health monitoring, kernel
+  filter synthesis, and safety qualification remain host responsibilities.
+  CAN write policy exists, but the flat manifest schema does not yet express
+  per-plugin bus/ID/rate grants; the host supplies those grants.
 - The JSON storage provider is a simple replace-on-write prototype, not SQLite,
   encrypted storage, or a multi-process transactional database.
 - Tabs are the only implemented Flutter extension-point facade. Notifications,
@@ -384,5 +390,5 @@ For a stripped Debian image:
   toolchains and `ivi-homescreen` integrations require product-specific build
   and lifecycle testing.
 - CMake fetches the pinned Lua source on first build; fully offline builds must
-  pass an unpacked source tree through `IVI_LUA_SOURCE_DIR` or seed the
+  pass an unpacked source tree through `VELOCE_LUA_SOURCE_DIR` or seed the
   dependency cache.

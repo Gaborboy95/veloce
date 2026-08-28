@@ -1,7 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:ivi_lua_core/ivi_lua_core.dart';
+import 'package:veloce_lua_core/veloce_lua_core.dart';
 
 final class DeveloperConsolePage extends StatefulWidget {
   const DeveloperConsolePage({super.key, required this.logManager});

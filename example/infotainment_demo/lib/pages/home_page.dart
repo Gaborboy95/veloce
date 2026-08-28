@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:ivi_lua_core/ivi_lua_core.dart';
+import 'package:veloce_lua_core/veloce_lua_core.dart';
 
+import '../can_input.dart';
 import '../demo_runtime.dart';
 
 final class HomePage extends StatefulWidget {
@@ -76,6 +77,27 @@ final class _HomePageState extends State<HomePage> {
               ],
             ),
           ),
+        ),
+        const SizedBox(height: 16),
+        StreamBuilder<DemoCanInputStatus>(
+          stream: widget.runtime.canInput.statuses,
+          initialData: widget.runtime.canInput.currentStatus,
+          builder: (context, snapshot) {
+            final status = snapshot.data!;
+            return Card(
+              child: ListTile(
+                leading: Icon(
+                  status.state == DemoCanInputState.running
+                      ? Icons.cable
+                      : status.state == DemoCanInputState.failed
+                      ? Icons.error_outline
+                      : Icons.usb_off,
+                ),
+                title: Text('CAN input: ${status.transport}'),
+                subtitle: Text(status.message),
+              ),
+            );
+          },
         ),
         const SizedBox(height: 16),
         Card(

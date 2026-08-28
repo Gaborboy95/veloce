@@ -89,11 +89,11 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "dev.ivi" "\0"
+            VALUE "CompanyName", "dev.veloce" "\0"
             VALUE "FileDescription", "infotainment_demo" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
             VALUE "InternalName", "infotainment_demo" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 dev.ivi. All rights reserved." "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 dev.veloce. All rights reserved." "\0"
             VALUE "OriginalFilename", "infotainment_demo.exe" "\0"
             VALUE "ProductName", "infotainment_demo" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"

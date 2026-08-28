@@ -1,7 +1,7 @@
-local ivi = require("ivi")
-local can = ivi.can
-local log = ivi.log
-local vehicle = ivi.vehicle
+local veloce = require("veloce")
+local can = veloce.can
+local log = veloce.log
+local vehicle = veloce.vehicle
 
 local function decode_engine_rpm(frame)
   local data = frame.data

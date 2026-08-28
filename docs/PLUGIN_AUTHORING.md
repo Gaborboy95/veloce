@@ -87,16 +87,16 @@ should not be relied upon for safety-critical cleanup.
 
 ## Importing API v1
 
-The API is available both through namespaces and through the sandboxed `ivi`
+The API is available both through namespaces and through the sandboxed `veloce`
 module:
 
 ```lua
-local ivi = require("ivi")
-local log = ivi.log
-local ui = ivi.ui
+local veloce = require("veloce")
+local log = veloce.log
+local ui = veloce.ui
 ```
 
-Only `require("ivi")` is supported. General Lua module and native-library
+Only `require("veloce")` is supported. General Lua module and native-library
 loading are intentionally unavailable.
 
 Every operation crosses a Dart dispatcher as the calling plugin ID and runtime
@@ -269,8 +269,9 @@ can.send({
 It requires all of the following: the manifest requests `can.write`, the host
 enables `can.write`, the provider enables writes, the frame matches the
 plugin's configured bus/ID grant, and the plugin remains within its maximum
-send rate. Use the in-memory provider for development; this repository does
-not yet include a SocketCAN provider.
+send rate. Use the in-memory provider for development. The reusable packages do
+not expose a transport provider; the desktop example contains read-only Linux
+SocketCAN and LAWICEL serial inputs that feed the same filtered provider.
 
 ### `storage`
 
@@ -382,7 +383,7 @@ the candidate is disposed and the current generation stays active. The host
 reports the plugin ID, phase, file, Lua line when available, and Lua traceback.
 
 File watching is a development feature, not an authenticated installation
-mechanism. A production IVI should install into a staged directory, verify
+mechanism. A production Veloce should install into a staged directory, verify
 signature/provenance and policy, then atomically move the verified plugin into
 the watched root.
 
@@ -391,7 +392,7 @@ the watched root.
 The native state opens only selected parts of the base library plus table,
 string, math, and UTF-8. It removes `dofile`, `loadfile`, `load`, `print`,
 `warn`, and `collectgarbage`; it does not open `io`, `os`, `debug`, `package`,
-or coroutine/native loading. `require` is replaced with an `ivi`-only loader.
+or coroutine/native loading. `require` is replaced with an `veloce`-only loader.
 
 Each plugin generation gets a distinct Lua state and a limiting allocator.
 Native protected calls apply instruction-count and monotonic-time budgets.
@@ -405,7 +406,7 @@ or an as-yet-unknown Lua vulnerability can still affect the host process. See
 1. Copy `plugins/hello_ui` to a new directory under the configured plugin root.
 2. Give it a unique reverse-domain `id`, semantic `version`, and only the
    permissions it actually uses.
-3. Keep `apiVersion` at `1` and implement `main.lua` using `require("ivi")`.
+3. Keep `apiVersion` at `1` and implement `main.lua` using `require("veloce")`.
 4. Put registrations in `on_load`; optionally return structured state from
    `on_save_state`.
 5. Start the demo, inspect the Plugins and Developer Console pages, and edit
