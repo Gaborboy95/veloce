@@ -1,0 +1,23 @@
+# Dart and Flutter tool output
+.dart_tool/
+**/.dart_tool/
+build/
+**/build/
+**/.plugin_symlinks/
+**/flutter/ephemeral/
+
+# IDE and local runtime state
+.idea/
+**/.idea/
+*.iml
+.ivi_plugin_storage/
+
+# Native compiler output
+*.dll
+*.so
+*.dylib
+*.lib
+*.exp
+*.pdb
+*.ilk
+*.obj

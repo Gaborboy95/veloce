@@ -1,0 +1,11 @@
+{
+  "id": "dev.example.vehicle_dashboard",
+  "name": "Vehicle Dashboard",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entrypoint": "main.lua",
+  "permissions": [
+    "vehicle.read",
+    "ui.tabs"
+  ]
+}

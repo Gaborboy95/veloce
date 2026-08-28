@@ -1,0 +1,12 @@
+{
+  "id": "dev.example.can_decoder",
+  "name": "Example CAN Decoder",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entrypoint": "main.lua",
+  "permissions": [
+    "logging",
+    "can.read",
+    "vehicle.write"
+  ]
+}

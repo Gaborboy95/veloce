@@ -1,0 +1,26 @@
+library;
+
+export 'src/api/plugin_api_registry.dart';
+export 'src/callbacks/plugin_callback_registry.dart';
+export 'src/can/can_models.dart';
+export 'src/can/can_provider.dart';
+export 'src/errors/plugin_exception.dart';
+export 'src/events/plugin_event_bus.dart';
+export 'src/extensions/plugin_extension_registry.dart';
+export 'src/logging/plugin_log.dart';
+export 'src/manager/plugin_manager.dart';
+export 'src/loader/plugin_loader.dart';
+export 'src/manifest/plugin_manifest.dart';
+export 'src/permissions/capability.dart';
+export 'src/permissions/capability_manager.dart';
+export 'src/runtime/plugin_script_runtime.dart';
+export 'src/runtime/plugin_state.dart';
+export 'src/registry/plugin_registry.dart';
+export 'src/storage/plugin_storage.dart';
+export 'src/timers/plugin_timer_registry.dart';
+export 'src/ui/plugin_ui_node.dart';
+export 'src/ui/plugin_ui_codec.dart';
+export 'src/ui/plugin_ui_registry.dart';
+export 'src/values/structured_value.dart';
+export 'src/vehicle/vehicle_data_bus.dart';
+export 'src/watcher/plugin_watcher.dart';

@@ -1,0 +1,12 @@
+{
+  "id": "dev.example.hello_ui",
+  "name": "Hello UI",
+  "version": "1.0.0",
+  "apiVersion": "1",
+  "entrypoint": "main.lua",
+  "permissions": [
+    "logging",
+    "ui.tabs",
+    "timer"
+  ]
+}

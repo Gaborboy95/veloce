@@ -1,0 +1,26 @@
+name: infotainment_demo
+description: Desktop demonstration host for the IVI Lua plugin runtime.
+publish_to: none
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.13.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  ivi_lua_core:
+    path: ../../packages/ivi_lua_core
+  ivi_lua_flutter:
+    path: ../../packages/ivi_lua_flutter
+  ivi_lua_native:
+    path: ../../packages/ivi_lua_native
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+
