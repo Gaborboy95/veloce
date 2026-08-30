@@ -4,13 +4,16 @@ version: 0.1.0
 publish_to: none
 
 environment:
-  sdk: ^3.9.0
+  sdk: '>=3.10.0 <4.0.0'
   flutter: ">=3.35.0"
 
 dependencies:
+  code_assets: ^2.0.0
   ffi: ^2.1.4
   flutter:
     sdk: flutter
+  hooks: ^2.2.0
+  native_toolchain_c: ^0.19.4
   veloce_lua_core:
     path: ../veloce_lua_core
 
@@ -23,7 +26,5 @@ dev_dependencies:
 flutter:
   plugin:
     platforms:
-      linux:
-        ffiPlugin: true
       windows:
         ffiPlugin: true
