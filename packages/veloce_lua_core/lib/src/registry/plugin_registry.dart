@@ -29,15 +29,14 @@ final class PluginRecord {
     bool clearError = false,
     String? generation,
     bool clearGeneration = false,
-  }) =>
-      PluginRecord(
-        directoryPath: directoryPath,
-        manifest: manifest ?? this.manifest,
-        state: state ?? this.state,
-        enabled: enabled ?? this.enabled,
-        latestError: clearError ? null : latestError ?? this.latestError,
-        generation: clearGeneration ? null : generation ?? this.generation,
-      );
+  }) => PluginRecord(
+    directoryPath: directoryPath,
+    manifest: manifest ?? this.manifest,
+    state: state ?? this.state,
+    enabled: enabled ?? this.enabled,
+    latestError: clearError ? null : latestError ?? this.latestError,
+    generation: clearGeneration ? null : generation ?? this.generation,
+  );
 }
 
 final class PluginRegistry {
@@ -46,10 +45,9 @@ final class PluginRegistry {
       StreamController.broadcast(sync: true);
 
   List<PluginRecord> get current => List.unmodifiable(
-        _records.values.toList()
-          ..sort(
-              (left, right) => left.manifest.id.compareTo(right.manifest.id)),
-      );
+    _records.values.toList()
+      ..sort((left, right) => left.manifest.id.compareTo(right.manifest.id)),
+  );
   Stream<List<PluginRecord>> get records async* {
     yield current;
     yield* _changes.stream;
@@ -63,7 +61,9 @@ final class PluginRegistry {
   }
 
   PluginRecord update(
-      String pluginId, PluginRecord Function(PluginRecord) edit) {
+    String pluginId,
+    PluginRecord Function(PluginRecord) edit,
+  ) {
     final current = _records[pluginId];
     if (current == null) throw StateError('Unknown plugin $pluginId.');
     final updated = edit(current);

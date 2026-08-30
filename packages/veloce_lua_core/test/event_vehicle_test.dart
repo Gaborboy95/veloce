@@ -4,35 +4,37 @@ import 'package:veloce_lua_core/veloce_lua_core.dart';
 import 'package:test/test.dart';
 
 void main() {
-  test('event queues are bounded and owner cleanup removes subscriptions',
-      () async {
-    final gate = Completer<void>();
-    final values = <int>[];
-    final bus = PluginEventBus(maxPendingPerSubscription: 2);
-    bus.subscribe(
-      ownerId: 'dev.example.slow',
-      topic: 'test.value',
-      handler: (event) async {
-        values.add(event.data! as int);
-        if (values.length == 1) await gate.future;
-      },
-    );
+  test(
+    'event queues are bounded and owner cleanup removes subscriptions',
+    () async {
+      final gate = Completer<void>();
+      final values = <int>[];
+      final bus = PluginEventBus(maxPendingPerSubscription: 2);
+      bus.subscribe(
+        ownerId: 'dev.example.slow',
+        topic: 'test.value',
+        handler: (event) async {
+          values.add(event.data! as int);
+          if (values.length == 1) await gate.future;
+        },
+      );
 
-    bus.publish('test.value', 0);
-    bus.publish('test.value', 1);
-    bus.publish('test.value', 2);
-    final fourth = bus.publish('test.value', 3);
-    final fifth = bus.publish('test.value', 4);
-    expect(fourth.droppedDeliveries + fifth.droppedDeliveries, 2);
-    gate.complete();
-    await bus.flush();
-    expect(values, [0, 3, 4]);
+      bus.publish('test.value', 0);
+      bus.publish('test.value', 1);
+      bus.publish('test.value', 2);
+      final fourth = bus.publish('test.value', 3);
+      final fifth = bus.publish('test.value', 4);
+      expect(fourth.droppedDeliveries + fifth.droppedDeliveries, 2);
+      gate.complete();
+      await bus.flush();
+      expect(values, [0, 3, 4]);
 
-    await bus.removeOwner('dev.example.slow');
-    expect(bus.subscriptionCountFor('dev.example.slow'), 0);
-    expect(bus.publish('test.value', 5).matchedSubscriptions, 0);
-    await bus.close();
-  });
+      await bus.removeOwner('dev.example.slow');
+      expect(bus.subscriptionCountFor('dev.example.slow'), 0);
+      expect(bus.publish('test.value', 5).matchedSubscriptions, 0);
+      await bus.close();
+    },
+  );
 
   test('vehicle bus coalesces rapid values and retains latest', () async {
     final gate = Completer<void>();
@@ -48,8 +50,11 @@ void main() {
     );
     bus.publish('engine.rpm', 1000, sourcePluginId: 'dev.example.decoder');
     bus.publish('engine.rpm', 2000, sourcePluginId: 'dev.example.decoder');
-    final result =
-        bus.publish('engine.rpm', 3000, sourcePluginId: 'dev.example.decoder');
+    final result = bus.publish(
+      'engine.rpm',
+      3000,
+      sourcePluginId: 'dev.example.decoder',
+    );
     expect(result.coalescedUpdates, 1);
     gate.complete();
     await bus.flush();

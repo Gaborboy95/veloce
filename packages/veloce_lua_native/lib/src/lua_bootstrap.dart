@@ -64,6 +64,16 @@ storage = {
   contains = function(key) return host_call("storage", "contains", key) end,
 }
 
+assets = {
+  exists = function(path) return host_call("assets", "exists", path) end,
+  list = function(prefix)
+    if prefix == nil then return host_call("assets", "list") end
+    return host_call("assets", "list", prefix)
+  end,
+  read_text = function(path) return host_call("assets", "read_text", path) end,
+  read_bytes = function(path) return host_call("assets", "read_bytes", path) end,
+}
+
 timer = {
   set_timeout = function(milliseconds, callback)
     return host_call("timer", "set_timeout", milliseconds, callback)
@@ -187,6 +197,29 @@ ui.unregister_tab = function(id)
   return host_call("ui", "unregister_tab", id)
 end
 
+local extension_renderers = {}
+
+ui.register_extension = function(definition)
+  if type(definition) ~= "table" or type(definition.point) ~= "string" or
+      type(definition.id) ~= "string" or type(definition.render) ~= "function" then
+    error("ui.register_extension requires point, id, and render", 2)
+  end
+  local key = definition.point .. "\0" .. definition.id
+  extension_renderers[key] = definition.render
+  return host_call("ui", "register_extension", {
+    point = definition.point,
+    id = definition.id,
+    title = definition.title,
+    icon_name = definition.icon_name,
+    content = extension_renderers[key](),
+  })
+end
+
+ui.unregister_extension = function(point, id)
+  extension_renderers[point .. "\0" .. id] = nil
+  return host_call("ui", "unregister_extension", point, id)
+end
+
 local veloce_module = {
   app = app,
   log = log,
@@ -195,6 +228,7 @@ local veloce_module = {
   can = can,
   ui = ui,
   storage = storage,
+  assets = assets,
   timer = timer,
 }
 

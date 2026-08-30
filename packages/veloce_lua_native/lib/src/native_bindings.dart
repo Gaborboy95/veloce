@@ -4,6 +4,7 @@ import 'dart:ffi';
 import 'dart:io';
 
 final class _VeloceLuaState extends Opaque {}
+final class VeloceLuaRpc extends Opaque {}
 
 typedef VeloceLuaStatePointer = Pointer<_VeloceLuaState>;
 
@@ -204,7 +205,35 @@ final class NativeLuaBindings {
           .lookupFunction<
             Uint64 Function(Pointer<_VeloceLuaState>),
             int Function(Pointer<_VeloceLuaState>)
-          >('veloce_lua_memory_used');
+          >('veloce_lua_memory_used'),
+      rpcCreate = library
+          .lookupFunction<
+            Pointer<VeloceLuaRpc> Function(),
+            Pointer<VeloceLuaRpc> Function()
+          >('veloce_lua_rpc_create'),
+      rpcWait = library
+          .lookupFunction<
+            Void Function(Pointer<VeloceLuaRpc>),
+            void Function(Pointer<VeloceLuaRpc>)
+          >('veloce_lua_rpc_wait'),
+      rpcComplete = library
+          .lookupFunction<
+            Int32 Function(Pointer<VeloceLuaRpc>, Pointer<Uint8>, Uint64),
+            int Function(Pointer<VeloceLuaRpc>, Pointer<Uint8>, int)
+          >('veloce_lua_rpc_complete'),
+      rpcResponse = library
+          .lookupFunction<
+            Pointer<Uint8> Function(
+              Pointer<VeloceLuaRpc>,
+              Pointer<Uint64>,
+            ),
+            Pointer<Uint8> Function(Pointer<VeloceLuaRpc>, Pointer<Uint64>)
+          >('veloce_lua_rpc_response'),
+      rpcDestroy = library
+          .lookupFunction<
+            Void Function(Pointer<VeloceLuaRpc>),
+            void Function(Pointer<VeloceLuaRpc>)
+          >('veloce_lua_rpc_destroy');
 
   factory NativeLuaBindings.open({String? libraryPath}) {
     if (libraryPath != null) {
@@ -267,4 +296,10 @@ final class NativeLuaBindings {
   final int Function(Pointer<_VeloceLuaState>, int) refAt;
   final void Function(Pointer<_VeloceLuaState>, int) unref;
   final int Function(Pointer<_VeloceLuaState>) memoryUsed;
+  final Pointer<VeloceLuaRpc> Function() rpcCreate;
+  final void Function(Pointer<VeloceLuaRpc>) rpcWait;
+  final int Function(Pointer<VeloceLuaRpc>, Pointer<Uint8>, int) rpcComplete;
+  final Pointer<Uint8> Function(Pointer<VeloceLuaRpc>, Pointer<Uint64>)
+      rpcResponse;
+  final void Function(Pointer<VeloceLuaRpc>) rpcDestroy;
 }

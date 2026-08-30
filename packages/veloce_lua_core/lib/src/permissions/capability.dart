@@ -29,8 +29,13 @@ abstract final class BuiltInCapabilities {
   static const canRead = Capability('can.read');
   static const canWrite = Capability('can.write');
   static const uiTabs = Capability('ui.tabs');
+  static const uiRender = Capability('ui.render');
+  static const uiSettings = Capability('ui.settings');
+  static const uiQuickControls = Capability('ui.quick_controls');
+  static const uiStatus = Capability('ui.status');
   static const uiNotifications = Capability('ui.notifications');
   static const storage = Capability('storage');
+  static const assetsRead = Capability('assets.read');
   static const timers = Capability('timer');
 
   static final Set<Capability> all = Set.unmodifiable({
@@ -42,8 +47,13 @@ abstract final class BuiltInCapabilities {
     canRead,
     canWrite,
     uiTabs,
+    uiRender,
+    uiSettings,
+    uiQuickControls,
+    uiStatus,
     uiNotifications,
     storage,
+    assetsRead,
     timers,
   });
 
@@ -58,8 +68,13 @@ abstract final class BuiltInCapabilities {
     vehicleWrite,
     canRead,
     uiTabs,
+    uiRender,
+    uiSettings,
+    uiQuickControls,
+    uiStatus,
     uiNotifications,
     storage,
+    assetsRead,
     timers,
   });
 }
@@ -67,9 +82,9 @@ abstract final class BuiltInCapabilities {
 /// Resolves capability strings and rejects unknown permissions.
 final class CapabilityCatalog {
   CapabilityCatalog(Iterable<Capability> capabilities)
-      : _byName = Map.unmodifiable({
-          for (final capability in capabilities) capability.name: capability,
-        });
+    : _byName = Map.unmodifiable({
+        for (final capability in capabilities) capability.name: capability,
+      });
 
   factory CapabilityCatalog.builtIn() =>
       CapabilityCatalog(BuiltInCapabilities.all);

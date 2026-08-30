@@ -66,8 +66,10 @@ void main() {
     logger.error('three');
 
     expect(logs.recent.map((event) => event.message), ['two', 'three']);
-    expect(logs.recent.every((event) => event.pluginId == 'dev.example.ui'),
-        isTrue);
+    expect(
+      logs.recent.every((event) => event.pluginId == 'dev.example.ui'),
+      isTrue,
+    );
     await logs.close();
   });
 
@@ -81,10 +83,8 @@ void main() {
     final timers = PluginTimerRegistry(
       pluginId: 'dev.example.ui',
       generation: 'g1',
-      invokeCallback: (reference, arguments) => callbacks.invoke(
-        reference,
-        arguments: arguments,
-      ),
+      invokeCallback: (reference, arguments) =>
+          callbacks.invoke(reference, arguments: arguments),
     );
     timers.setInterval(const Duration(milliseconds: 10), callback);
     await Future<void>.delayed(const Duration(milliseconds: 35));

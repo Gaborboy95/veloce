@@ -18,8 +18,18 @@ so Flutter can create plugin-package symlinks.
 
 The plugin root is resolved from `--plugins PATH`, `--plugins=PATH`, the
 `VELOCE_PLUGIN_DIR` environment variable, or the repository layout. Set
-`VELOCE_PLUGIN_STORAGE` to change the JSON storage directory and
+`VELOCE_PLUGIN_STORAGE` to change the SQLite storage directory and
 `VELOCE_LUA_LIBRARY` to use an explicitly built native library during development.
+
+The demo automatically reads a filesystem `.env` file. It checks the current
+working directory, `example/infotainment_demo/.env` relative to the repository
+root, and the executable directory. Use `--env-file=PATH` to select another
+file. Real process environment variables override values from `.env`, which in
+turn override application defaults. Supported syntax is `KEY=value`, optional
+`export`, single/double quotes, comments, and common double-quoted escapes.
+Variable interpolation is intentionally not performed. The file is ignored by
+Git and is not compiled into Flutter assets; deployed builds should place it
+beside the executable or pass an explicit path.
 
 ## CAN input
 
@@ -43,10 +53,10 @@ export VELOCE_CAN_BUS=comfort
 flutter run -d linux
 ```
 
-The reader accepts Classical CAN and CAN FD data frames. RTR and error frames
-are deliberately ignored because the core `CanFrame` model does not represent
-them. Frames are polled non-blockingly in bounded batches and then enter the
-same provider-side subscription filters used by manual injection. See the
+The reader accepts Classical CAN/CAN FD data, RTR, and SocketCAN controller
+error frames. RTR/error delivery remains opt-in per manifest and subscription.
+Frames are polled non-blockingly in bounded batches and then enter the same
+provider-side subscription filters used by manual injection. See the
 [Linux kernel SocketCAN documentation](https://docs.kernel.org/networking/can.html)
 for interface setup and raw-socket semantics.
 
@@ -63,16 +73,29 @@ flutter run -d windows
 Optional `VELOCE_LAWICEL_SERIAL_BAUD` defaults to `115200`. The adapter is
 initialized with `C`, the appropriate standard `S0`–`S8` bitrate command, and
 `O`. The parser accepts standard `t` and extended `T` data records, with
-optional LAWICEL timestamps. RTR records are ignored. This path uses the
+optional LAWICEL timestamps, plus standard `r` and extended `R` RTR records.
+This path uses the
 adapter's virtual COM port through `flutter_libserialport`; no vendor DLL API is
 required. Command framing follows the
 [LAWICEL CANUSB ASCII manual](https://www.canusb.com/docs/canusb_manual.pdf).
 The bundled native `libserialport` library is LGPL-3.0-or-later; downstream
 distributions must satisfy its license obligations.
 
-The example is read-only: Lua CAN writes remain disabled. Hardware adapters,
-bus termination, electrical isolation, permissions, reconnect policy, and
-safety validation remain deployment responsibilities.
+Lua CAN writes are disabled unless all of these are true:
+
+- `.env` or the process environment sets `VELOCE_CAN_WRITE_ENABLED=true`;
+- the plugin requests `can.write` and declares matching manifest write filters
+  plus `maxSendRatePerSecond`;
+- the selected transport is running and accepts the frame.
+
+When enabled, SocketCAN uses the bound raw socket and LAWICEL emits `t`/`T` or
+`r`/`R` commands. Memory mode records fake sends without hardware. This switch
+is for development, not safety authorization. Hardware adapters, bus
+termination, electrical isolation, reconnect/bus-off policy, and safety
+validation remain deployment responsibilities.
+
+The demo uses one Dart isolate per Lua plugin. A runaway script is interrupted
+by its instruction/deadline budget without occupying the Flutter UI isolate.
 
 Use **Inject 3000 RPM frame** to exercise:
 

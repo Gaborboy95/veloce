@@ -164,6 +164,7 @@ final class NativeLuaRuntime implements PluginScriptRuntime {
       'can',
       'ui',
       'storage',
+      'assets',
       'timer',
     };
     for (final namespace in _apiRegistry.namespaces) {

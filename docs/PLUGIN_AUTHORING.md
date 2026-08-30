@@ -7,12 +7,8 @@ installed or replaced without recompiling the Flutter host:
 my_plugin/
 ├── manifest.json
 ├── main.lua
-└── assets/                 # reserved for host-mediated asset access
+└── assets/                 # optional, host-mediated read-only files
 ```
-
-The current API does not expose direct filesystem access, including access to
-`assets/`. Keep assets in the plugin directory for forward compatibility, but
-do not assume Lua can open them yet.
 
 ## Manifest
 
@@ -27,7 +23,9 @@ do not assume Lua can open them yet.
     "logging",
     "events",
     "vehicle.read",
-    "ui.tabs"
+    "ui.tabs",
+    "ui.render",
+    "assets.read"
   ]
 }
 ```
@@ -115,7 +113,12 @@ receives an underlying Dart object or raw native pointer.
 | `can.read` | `can.subscribe` | Also constrained by the host's bus/ID-set/mask grant. |
 | `can.write` | `can.send` | Disabled by default; also needs a host grant and rate limit. |
 | `ui.tabs` | tab registration/update/removal | UI is a validated declarative tree. |
-| `ui.notifications` | reserved notification extension | The capability exists; no API v1 notification method is currently exposed. |
+| `ui.render` | retain declarative control callbacks and generic extensions | Required by interactive controls and `ui.register_extension`. |
+| `ui.settings` | `ui.settings.pages` extension contributions | Host chooses where/how to present them. |
+| `ui.quick_controls` | `ui.quick_controls` contributions | Intended for bounded quick-control surfaces. |
+| `ui.status` | `ui.status.widgets` contributions | Intended for compact status surfaces. |
+| `ui.notifications` | `ui.notifications` contributions | Declarative notification content, not arbitrary Flutter access. |
+| `assets.read` | `assets.*` | Read-only access to a bounded snapshot of this plugin's `assets/`. |
 | `storage` | `storage.*` | Permanently scoped to the calling plugin ID. |
 | `timer` | `timer.*` | Timers and their callbacks are generation-owned. |
 
@@ -241,19 +244,46 @@ can.subscribe({
 
 `id` and `ids` are mutually exclusive. `mask` is optional and defaults to the
 full standard or extended identifier width. It has no effect when both ID
-fields are omitted. The provider evaluates the bus, ID set, mask, and optional
-`extended` value before a matching frame enters the plugin callback queue. A
-frame has this shape:
+fields are omitted. `include_remote` and `include_errors` default to `false`.
+The provider evaluates these fields before a matching frame enters the plugin
+callback queue. A data frame has this shape:
 
 ```lua
 {
   bus = "comfort",
+  type = "data",
   id = 0x280,
   data = { 0x0B, 0xB8 },
   extended = false,
-  timestampMicros = 123456789 -- optional
+  timestamp_micros = 123456789 -- optional
 }
 ```
+
+RTR callbacks have `type = "remote"`, an empty `data` array, and `length`.
+Controller error callbacks require `include_errors = true`; they have
+`type = "error"`, `error_flags` using SocketCAN's `CAN_ERR_*` bit layout, and
+up to eight controller-detail bytes. Error frames cannot be transmitted.
+
+CAN access is declared in the manifest as well as in `permissions`:
+
+```json
+{
+  "permissions": ["can.read", "can.write"],
+  "can": {
+    "read": [
+      { "bus": "comfort", "ids": [640, 641], "mask": 2047 }
+    ],
+    "write": [
+      { "bus": "comfort", "id": 1280, "mask": 2047 }
+    ],
+    "maxSendRatePerSecond": 5
+  }
+}
+```
+
+Manifest filter booleans use JSON names `includeRemote` and `includeErrors`.
+The runtime creates a separate authorization owner for every generation, so a
+transactional candidate cannot alter the working generation's grants.
 
 Sending is prepared but privileged:
 
@@ -264,14 +294,21 @@ can.send({
   data = { 0x01, 0x02, 0x03 },
   extended = false,
 })
+
+can.send({
+  type = "remote",
+  bus = "comfort",
+  id = 0x501,
+  length = 4,
+})
 ```
 
 It requires all of the following: the manifest requests `can.write`, the host
 enables `can.write`, the provider enables writes, the frame matches the
 plugin's configured bus/ID grant, and the plugin remains within its maximum
-send rate. Use the in-memory provider for development. The reusable packages do
-not expose a transport provider; the desktop example contains read-only Linux
-SocketCAN and LAWICEL serial inputs that feed the same filtered provider.
+send rate. Use the in-memory provider for development. Transport code remains
+outside the reusable packages; the desktop example supports opt-in SocketCAN
+and LAWICEL transmission as well as input.
 
 ### `storage`
 
@@ -282,11 +319,27 @@ local exists = storage.contains("theme")
 storage.remove("theme")
 ```
 
-Keys and files are scoped by the calling plugin ID. The prototype offers
-in-memory and JSON-backed providers. JSON persistence serializes operations and
-uses a temporary-file replacement, but it is not a database transaction system
-and does not provide encryption. Hosts can replace it with SQLite by
-implementing the storage interface.
+Keys are scoped by the calling plugin ID. The core offers in-memory, atomic
+JSON-file, and SQLite providers. The example uses SQLite. Storage is not
+encrypted; use a platform-appropriate encrypted database/key strategy when the
+stored values are sensitive.
+
+### `assets`
+
+With `assets.read`, Lua can read only the immutable generation snapshot loaded
+from its own `assets/` directory:
+
+```lua
+local text = assets.read_text("config/defaults.json")
+local bytes = assets.read_bytes("icons/seat.bin")
+local exists = assets.exists("icons/seat.bin")
+local names = assets.list("icons/")
+```
+
+Paths are relative, forward-slash-separated, and cannot contain `.`/`..`,
+backslashes, control characters, absolute roots, or symlink entries. File count,
+individual size, and total snapshot size are bounded before Lua initialization.
+Lua never receives a filesystem path or file handle.
 
 ### `timer`
 
@@ -362,8 +415,27 @@ the Flutter package's allowlist. Lua cannot instantiate a widget, access a
 `BuildContext`, import a Dart library, or hold a Dart object.
 
 Tabs are a facade over a generic extension registry. Future host versions can
-add extension points such as settings pages or quick controls without exposing
-Flutter internals to plugins.
+also consume settings pages, quick controls, status widgets, and notifications:
+
+```lua
+ui.register_extension({
+  point = "ui.quick_controls",
+  id = "heated_seat",
+  title = "Heated seat",
+  render = function()
+    return ui.switch({
+      label = "Driver seat",
+      value = enabled,
+      on_change = set_enabled,
+    })
+  end,
+})
+```
+
+Use `ui.unregister_extension(point, id)` for explicit removal. The point's
+capability and `ui.render` are both checked; unload removes every contribution
+regardless. Hosts consume `PluginUiRegistry.contributions(point)` and decide
+where the validated model appears.
 
 ## Hot reload behavior
 
@@ -382,10 +454,27 @@ If parsing, compilation, initialization, state transfer, or validation fails,
 the candidate is disposed and the current generation stays active. The host
 reports the plugin ID, phase, file, Lua line when available, and Lua traceback.
 
-File watching is a development feature, not an authenticated installation
-mechanism. A production Veloce should install into a staged directory, verify
-signature/provenance and policy, then atomically move the verified plugin into
-the watched root.
+File watching is a development feature. `PluginInstaller` provides the
+production-oriented directory flow: validate, enforce size/link rules, compute
+a canonical SHA-256 package digest, verify a trusted Ed25519 signature, copy to
+a same-filesystem hidden staging directory, then atomically rename. Replaced
+versions remain as verified rollback candidates and provenance is recorded.
+
+`signature.json` is excluded from the signed payload and has this form:
+
+```json
+{
+  "algorithm": "ed25519",
+  "keyId": "manufacturer-2026",
+  "digest": "64 lowercase SHA-256 hex characters",
+  "signature": "base64 Ed25519 signature over the 32 digest bytes"
+}
+```
+
+Use `PluginInstaller.computeDigest` in a trusted packaging tool. Configure
+`Ed25519PluginSignatureVerifier` with trusted public keys and optional plugin-ID
+allowlists. `requireSignature` defaults to `true`; disable it only for an
+explicit developer installation path.
 
 ## Sandbox contract
 
@@ -394,11 +483,12 @@ string, math, and UTF-8. It removes `dofile`, `loadfile`, `load`, `print`,
 `warn`, and `collectgarbage`; it does not open `io`, `os`, `debug`, `package`,
 or coroutine/native loading. `require` is replaced with an `veloce`-only loader.
 
-Each plugin generation gets a distinct Lua state and a limiting allocator.
-Native protected calls apply instruction-count and monotonic-time budgets.
-These controls reduce accidental and script-level denial of service; they are
-not process isolation. A defect in native code, a compromised native library,
-or an as-yet-unknown Lua vulnerability can still affect the host process. See
+Each plugin generation gets a distinct Lua state, Dart isolate, and limiting
+allocator. Native protected calls apply instruction-count and monotonic-time
+budgets. A runaway plugin cannot occupy the Flutter UI isolate, but Dart
+isolates are not process isolation. A defect in native code, a compromised
+native library, or an as-yet-unknown Lua vulnerability can still affect the
+host process. See
 [THREADING.md](THREADING.md) for the current execution model and hardening path.
 
 ## Create a new plugin

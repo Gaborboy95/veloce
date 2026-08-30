@@ -102,10 +102,8 @@ final class PluginApiCall {
 /// deliver completion through a callback/event.
 typedef PluginApiHandler = StructuredValue Function(PluginApiCall call);
 
-typedef PluginApiPermissionChecker = void Function(
-  PluginApiCall call,
-  Capability capability,
-);
+typedef PluginApiPermissionChecker =
+    void Function(PluginApiCall call, Capability capability);
 
 final class PluginApiMethod {
   const PluginApiMethod({required this.capability, required this.handler});
@@ -138,8 +136,8 @@ final class PluginApiRegistry {
     required this.capabilityManager,
     PluginApiPermissionChecker? permissionChecker,
     StructuredValueCodec codec = const StructuredValueCodec(),
-  })  : _permissionChecker = permissionChecker,
-        _codec = codec;
+  }) : _permissionChecker = permissionChecker,
+       _codec = codec;
 
   final CapabilityManager capabilityManager;
   final PluginApiPermissionChecker? _permissionChecker;
@@ -150,10 +148,7 @@ final class PluginApiRegistry {
   Iterable<PluginApiNamespace> get namespaces =>
       List<PluginApiNamespace>.unmodifiable(_namespaces.values);
 
-  void registerNamespace(
-    PluginApiNamespace namespace, {
-    bool replace = false,
-  }) {
+  void registerNamespace(PluginApiNamespace namespace, {bool replace = false}) {
     if (_namespaces.containsKey(namespace.name) && !replace) {
       throw StateError('API namespace "${namespace.name}" is registered.');
     }

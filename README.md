@@ -17,7 +17,7 @@ security boundary.
 - Dynamic discovery, load, unload, enable/disable, and debounced hot reload.
 - A replacement-first reload path: a broken candidate does not replace the
   currently running generation.
-- One Lua state and callback generation per loaded plugin.
+- One Dart isolate, Lua state, and callback generation per loaded plugin.
 - Capability checks at the Dart host-API boundary.
 - Owner-aware cleanup for subscriptions, timers, callbacks, CAN registrations,
   and UI contributions.
@@ -25,7 +25,9 @@ security boundary.
 - Abstract event and vehicle-data buses with bounded delivery policies.
 - Provider-side CAN filtering and an in-memory CAN provider for demos/tests.
 - A validated UI model converted to a small allowlisted set of Flutter widgets.
-- Plugin-attributed logs and plugin-scoped in-memory/JSON storage.
+- Plugin-attributed logs and plugin-scoped in-memory/JSON/SQLite storage.
+- Ed25519-authenticated atomic installation, provenance, and rollback.
+- Bounded read-only plugin assets and generic declarative UI extension points.
 - Execution instruction, wall-clock, memory, and timer limits.
 
 ## Repository layout
@@ -74,8 +76,9 @@ Flutter host / ivi-homescreen integration
 │   └── validated PluginUiNode → Flutter Widget
 │
 └── PluginScriptRuntime abstraction
-    └── NativeLuaRuntime
-        └── private FFI shim → independent Lua 5.4 state
+    └── IsolatedNativeLuaRuntime (one isolate per generation)
+        └── NativeLuaRuntime
+            └── private FFI shim → independent Lua 5.4 state
 ```
 
 All resources carry an owner plugin ID; callbacks additionally carry a runtime
@@ -142,7 +145,7 @@ plugins/com_example_demo/
   "version": "1.0.0",
   "apiVersion": "1",
   "entrypoint": "main.lua",
-  "permissions": ["logging", "ui.tabs"]
+  "permissions": ["logging", "ui.tabs", "ui.render"]
 }
 ```
 
@@ -180,6 +183,7 @@ vehicle.*   abstract vehicle signals
 can.*       filtered transport access
 ui.*        declarative UI and extension registration
 storage.*   plugin-scoped structured persistence
+assets.*    bounded read-only plugin asset snapshot
 timer.*     plugin-owned timeouts and intervals
 ```
 
@@ -189,15 +193,16 @@ Built-in capabilities are:
 app.info      logging       events
 vehicle.read  vehicle.write
 can.read      can.write
-ui.tabs       ui.notifications
-storage       timer
+ui.tabs       ui.render       ui.settings
+ui.quick_controls  ui.status  ui.notifications
+assets.read   storage         timer
 ```
 
 A manifest request is necessary but not sufficient: the host can disable a
-capability or apply a per-plugin authorization policy. CAN additionally supports
-bus/ID-set/mask grants and maximum write rates. A filter can select one ID,
-multiple IDs, or all IDs on a bus. `can.write` is disabled by default.
-Unknown capability names fail manifest validation.
+capability or apply a per-plugin authorization policy. CAN manifests additionally
+declare read/write bus, ID-set, mask, RTR/error, and maximum-rate grants. A filter
+can select one ID, multiple IDs, or all IDs on a bus. `can.write` is disabled by
+default. Unknown capability names fail manifest validation.
 
 Hosts add an API without weakening attribution by registering a namespace of
 methods, each tied to a catalogued capability. Every call arrives with the
@@ -211,10 +216,10 @@ Plugins return immutable intermediate nodes, currently `text`, `icon`, `row`,
 `card`. The Dart validator rejects malformed/oversized trees and Flutter maps
 only allowlisted node and icon types to real widgets.
 
-Tabs are the first UI extension point, exposed as a stream from
-`PluginUiRegistry`. The underlying registry is generic so settings pages, quick
-controls, or other host-defined points can be added without coupling the core
-to tabs. Control functions become generation-scoped callback IDs. Lua never
+Tabs are exposed as a stream from `PluginUiRegistry`. The same validated model
+now supports settings pages, quick controls, status widgets, and notifications
+through named contribution streams. Control functions become generation-scoped
+callback IDs. Lua never
 receives a widget constructor, `BuildContext`, reflection handle, or Dart
 closure.
 
@@ -234,8 +239,9 @@ change → parse → fresh Lua state → load → initialize → validate
 
 Diagnostics retain plugin ID, lifecycle phase, source filename, Lua line when
 available, and traceback. Watching is a developer convenience, not a secure
-installer; production deployments still need package provenance/signature and
-an atomic installation policy.
+installer. `PluginInstaller` separately verifies trusted Ed25519 signatures,
+records provenance, stages on the destination filesystem, atomically replaces
+the active directory, and retains a verified rollback version.
 
 ## Sandbox
 
@@ -252,10 +258,10 @@ and string-keyed maps/tables. UI callbacks are opaque IDs, never native or Dart
 objects.
 
 This is defense in depth inside the Flutter process, not a complete boundary
-for hostile native code. Current execution is serialized on the Dart isolate
-that owns the Lua state; it is not yet moved to a dedicated isolate or process.
-See [the threading guide](docs/THREADING.md) for queue behavior and the planned
-isolate/process hardening path.
+for hostile native code. The demo places every plugin generation and its native
+state in a dedicated Dart isolate, so a runaway script cannot freeze Flutter's
+UI isolate. Isolates still share the process; use a restricted helper process
+for a stronger third-party boundary. See [the threading guide](docs/THREADING.md).
 
 ## Running the desktop demo
 
@@ -352,7 +358,8 @@ For a stripped Debian image:
 - do not install or dynamically locate a system `liblua`;
 - keep the plugin and storage roots outside the immutable application image and
   grant only the required Unix permissions;
-- make production plugin installation authenticated and atomic;
+- configure trusted Ed25519 keys and use `PluginInstaller` for production
+  installation/rollback rather than copying into the watched root;
 - configure CAN grants and writes explicitly; never make the demo provider a
   production default;
 - test the Lua deadline hook and FFI library loading on the target architecture,
@@ -371,13 +378,15 @@ For a stripped Debian image:
 
 ## Known limitations
 
-- Lua currently executes on its owning Dart isolate, normally the Flutter host
-  isolate. Calls are bounded and serialized but not yet offloaded.
 - Isolates do not contain native crashes; a restricted helper process is the
   appropriate stronger boundary for genuinely hostile plugins.
-- The example includes read-only SocketCAN and LAWICEL input adapters, but they
-  are not production transport services: reconnect, health monitoring, kernel
-  filter synthesis, and safety qualification remain host responsibilities.
+- The example includes opt-in SocketCAN and LAWICEL transmit/receive adapters,
+  but they are not production transport services: reconnect, health monitoring,
+  kernel filter synthesis, bus-off recovery, and safety qualification remain
+  host responsibilities.
+- SQLite access is serialized but synchronous inside the host isolate. Move
+  high-volume storage to a dedicated storage isolate before using it on a busy
+  UI path.
   CAN write policy exists, but the flat manifest schema does not yet express
   per-plugin bus/ID/rate grants; the host supplies those grants.
 - The JSON storage provider is a simple replace-on-write prototype, not SQLite,

@@ -18,8 +18,10 @@ final class PluginSource {
 }
 
 final class PluginDiscoveryFailure {
-  const PluginDiscoveryFailure(
-      {required this.directoryPath, required this.error});
+  const PluginDiscoveryFailure({
+    required this.directoryPath,
+    required this.error,
+  });
 
   final String directoryPath;
   final PluginException error;
@@ -29,8 +31,8 @@ final class PluginDiscoveryResult {
   PluginDiscoveryResult({
     required Iterable<PluginSource> plugins,
     required Iterable<PluginDiscoveryFailure> failures,
-  })  : plugins = List.unmodifiable(plugins),
-        failures = List.unmodifiable(failures);
+  }) : plugins = List.unmodifiable(plugins),
+       failures = List.unmodifiable(failures);
 
   final List<PluginSource> plugins;
   final List<PluginDiscoveryFailure> failures;
@@ -39,7 +41,7 @@ final class PluginDiscoveryResult {
 /// Reads and validates plugin directories without executing plugin code.
 final class PluginLoader {
   PluginLoader({PluginManifestParser? manifestParser})
-      : _manifestParser = manifestParser ?? PluginManifestParser();
+    : _manifestParser = manifestParser ?? PluginManifestParser();
 
   final PluginManifestParser _manifestParser;
 
@@ -93,6 +95,8 @@ final class PluginLoader {
 
     await for (final entity in root.list(followLinks: false)) {
       if (entity is! Directory) continue;
+      final segments = entity.uri.pathSegments.where((item) => item.isNotEmpty);
+      if (segments.isNotEmpty && segments.last.startsWith('.')) continue;
       try {
         final source = await loadDirectory(entity);
         final existing = byId[source.manifest.id];
@@ -140,8 +144,9 @@ final class PluginLoader {
       }
     }
     plugins.removeWhere((plugin) => duplicateIds.contains(plugin.manifest.id));
-    plugins
-        .sort((left, right) => left.manifest.id.compareTo(right.manifest.id));
+    plugins.sort(
+      (left, right) => left.manifest.id.compareTo(right.manifest.id),
+    );
     return PluginDiscoveryResult(plugins: plugins, failures: failures);
   }
 
@@ -156,8 +161,9 @@ final class PluginLoader {
       );
       final target = await entrypoint.resolveSymbolicLinks();
       final normalizedRoot = Platform.isWindows ? root.toLowerCase() : root;
-      final normalizedTarget =
-          Platform.isWindows ? target.toLowerCase() : target;
+      final normalizedTarget = Platform.isWindows
+          ? target.toLowerCase()
+          : target;
       if (!normalizedTarget.startsWith(normalizedRoot)) {
         throw PluginManifestException(
           'Entrypoint resolves outside the plugin directory.',
@@ -182,6 +188,6 @@ final class PluginLoader {
 
   static String _withTrailingSeparator(String path) =>
       path.endsWith(Platform.pathSeparator)
-          ? path
-          : '$path${Platform.pathSeparator}';
+      ? path
+      : '$path${Platform.pathSeparator}';
 }

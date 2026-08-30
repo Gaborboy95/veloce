@@ -6,6 +6,7 @@
   "entrypoint": "main.lua",
   "permissions": [
     "vehicle.read",
-    "ui.tabs"
+    "ui.tabs",
+    "ui.render"
   ]
 }

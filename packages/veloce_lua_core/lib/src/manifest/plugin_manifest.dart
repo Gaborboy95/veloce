@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import '../can/can_models.dart';
 import '../errors/plugin_exception.dart';
 import '../permissions/capability.dart';
 
@@ -31,7 +32,9 @@ final class SemanticVersion implements Comparable<SemanticVersion> {
     }
     final preRelease = match.group(4);
     if (preRelease != null &&
-        preRelease.split('.').any(
+        preRelease
+            .split('.')
+            .any(
               (identifier) =>
                   identifier.length > 1 &&
                   identifier.startsWith('0') &&
@@ -113,7 +116,7 @@ abstract interface class ApiVersionPolicy {
 
 final class ExactApiVersionPolicy implements ApiVersionPolicy {
   ExactApiVersionPolicy(Iterable<String> supportedVersions)
-      : supportedVersions = Set.unmodifiable(supportedVersions);
+    : supportedVersions = Set.unmodifiable(supportedVersions);
 
   final Set<String> supportedVersions;
 
@@ -134,7 +137,9 @@ final class PluginManifest {
     required this.apiVersion,
     required this.entrypoint,
     required Iterable<Capability> permissions,
-  }) : permissions = Set.unmodifiable(permissions);
+    CanAccessGrant? canAccess,
+  }) : permissions = Set.unmodifiable(permissions),
+       canAccess = canAccess ?? CanAccessGrant();
 
   final String id;
   final String name;
@@ -142,24 +147,46 @@ final class PluginManifest {
   final String apiVersion;
   final String entrypoint;
   final Set<Capability> permissions;
+  final CanAccessGrant canAccess;
 
   Map<String, Object?> toJson() => {
-        'id': id,
-        'name': name,
-        'version': version.toString(),
-        'apiVersion': apiVersion,
-        'entrypoint': entrypoint,
-        'permissions': permissions.map((value) => value.name).toList(),
-      };
+    'id': id,
+    'name': name,
+    'version': version.toString(),
+    'apiVersion': apiVersion,
+    'entrypoint': entrypoint,
+    'permissions': permissions.map((value) => value.name).toList(),
+    if (canAccess.readFilters.isNotEmpty ||
+        canAccess.writeFilters.isNotEmpty ||
+        canAccess.maxSendRatePerSecond > 0)
+      'can': {
+        'read': canAccess.readFilters.map(_canFilterToJson).toList(),
+        'write': canAccess.writeFilters.map(_canFilterToJson).toList(),
+        'maxSendRatePerSecond': canAccess.maxSendRatePerSecond,
+      },
+  };
+
+  static Map<String, Object?> _canFilterToJson(CanFilter filter) => {
+    'bus': filter.bus,
+    if (!filter.matchesAllIds)
+      if (filter.ids.length == 1)
+        'id': filter.ids.single
+      else
+        'ids': filter.ids,
+    'mask': filter.mask,
+    if (filter.extended != null) 'extended': filter.extended,
+    if (filter.includeRemote) 'includeRemote': true,
+    if (filter.includeErrors) 'includeErrors': true,
+  };
 }
 
 final class PluginManifestParser {
   PluginManifestParser({
     CapabilityCatalog? capabilityCatalog,
     ApiVersionPolicy? apiVersionPolicy,
-  })  : capabilityCatalog = capabilityCatalog ?? CapabilityCatalog.builtIn(),
-        apiVersionPolicy =
-            apiVersionPolicy ?? ExactApiVersionPolicy(const {'1'});
+  }) : capabilityCatalog = capabilityCatalog ?? CapabilityCatalog.builtIn(),
+       apiVersionPolicy =
+           apiVersionPolicy ?? ExactApiVersionPolicy(const {'1'});
 
   static final RegExp _idPattern = RegExp(
     r'^[a-z][a-z0-9]*(?:\.[a-z][a-z0-9_-]*)+$',
@@ -255,6 +282,37 @@ final class PluginManifestParser {
       permissions.add(capabilityCatalog.resolve(value, pluginId: id));
     }
 
+    final canAccess = _parseCanAccess(json['can'], pluginId: id);
+    final requestsCanRead = permissions.contains(BuiltInCapabilities.canRead);
+    final requestsCanWrite = permissions.contains(BuiltInCapabilities.canWrite);
+    if (requestsCanRead && !canAccess.permitsReads) {
+      throw PluginManifestException(
+        'Permission "can.read" requires at least one can.read filter.',
+        pluginId: id,
+      );
+    }
+    if (!requestsCanRead && canAccess.readFilters.isNotEmpty) {
+      throw PluginManifestException(
+        'CAN read filters require permission "can.read".',
+        pluginId: id,
+      );
+    }
+    if (requestsCanWrite && !canAccess.permitsWrites) {
+      throw PluginManifestException(
+        'Permission "can.write" requires a write filter and a positive '
+        'maxSendRatePerSecond.',
+        pluginId: id,
+      );
+    }
+    if (!requestsCanWrite &&
+        (canAccess.writeFilters.isNotEmpty ||
+            canAccess.maxSendRatePerSecond > 0)) {
+      throw PluginManifestException(
+        'CAN write policy requires permission "can.write".',
+        pluginId: id,
+      );
+    }
+
     return PluginManifest(
       id: id,
       name: name,
@@ -262,7 +320,146 @@ final class PluginManifestParser {
       apiVersion: apiVersion,
       entrypoint: entrypoint,
       permissions: permissions,
+      canAccess: canAccess,
     );
+  }
+
+  static CanAccessGrant _parseCanAccess(
+    Object? value, {
+    required String pluginId,
+  }) {
+    if (value == null) return CanAccessGrant();
+    if (value is! Map<String, Object?>) {
+      throw PluginManifestException(
+        '"can" must be an object.',
+        pluginId: pluginId,
+      );
+    }
+    const knownKeys = {'read', 'write', 'maxSendRatePerSecond'};
+    final unknown = value.keys.where((key) => !knownKeys.contains(key));
+    if (unknown.isNotEmpty) {
+      throw PluginManifestException(
+        'Unknown CAN policy field "${unknown.first}".',
+        pluginId: pluginId,
+      );
+    }
+
+    List<CanFilter> parseFilters(String field, {required bool write}) {
+      final raw = value[field];
+      if (raw == null) return const [];
+      if (raw is! List<Object?>) {
+        throw PluginManifestException(
+          '"can.$field" must be an array of filter objects.',
+          pluginId: pluginId,
+        );
+      }
+      return [
+        for (var index = 0; index < raw.length; index++)
+          _parseCanFilter(
+            raw[index],
+            pluginId: pluginId,
+            field: 'can.$field[$index]',
+            write: write,
+          ),
+      ];
+    }
+
+    final rate = value['maxSendRatePerSecond'] ?? 0;
+    if (rate is! int || rate < 0 || rate > 100000) {
+      throw PluginManifestException(
+        '"can.maxSendRatePerSecond" must be an integer in 0..100000.',
+        pluginId: pluginId,
+      );
+    }
+    try {
+      return CanAccessGrant(
+        readFilters: parseFilters('read', write: false),
+        writeFilters: parseFilters('write', write: true),
+        maxSendRatePerSecond: rate,
+      );
+    } on ArgumentError catch (error, stackTrace) {
+      throw PluginManifestException(
+        'Invalid CAN policy: ${error.message}',
+        pluginId: pluginId,
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  static CanFilter _parseCanFilter(
+    Object? value, {
+    required String pluginId,
+    required String field,
+    required bool write,
+  }) {
+    if (value is! Map<String, Object?>) {
+      throw PluginManifestException(
+        '"$field" must be an object.',
+        pluginId: pluginId,
+      );
+    }
+    const knownKeys = {
+      'bus',
+      'id',
+      'ids',
+      'mask',
+      'extended',
+      'includeRemote',
+      'includeErrors',
+    };
+    final unknown = value.keys.where((key) => !knownKeys.contains(key));
+    if (unknown.isNotEmpty) {
+      throw PluginManifestException(
+        'Unknown CAN filter field "${unknown.first}" in "$field".',
+        pluginId: pluginId,
+      );
+    }
+    final bus = value['bus'];
+    final id = value['id'];
+    final rawIds = value['ids'];
+    final mask = value['mask'];
+    final extended = value['extended'];
+    final includeRemote = value['includeRemote'] ?? false;
+    final includeErrors = value['includeErrors'] ?? false;
+    if (bus is! String ||
+        (id != null && id is! int) ||
+        (mask != null && mask is! int) ||
+        (extended != null && extended is! bool) ||
+        includeRemote is! bool ||
+        includeErrors is! bool ||
+        (rawIds != null &&
+            (rawIds is! List<Object?> || rawIds.any((item) => item is! int)))) {
+      throw PluginManifestException(
+        'Invalid field type in "$field".',
+        pluginId: pluginId,
+      );
+    }
+    if (write && includeErrors) {
+      throw PluginManifestException(
+        '"$field" cannot allow controller error frames.',
+        pluginId: pluginId,
+      );
+    }
+    try {
+      final ids = rawIds is List<Object?> ? rawIds.cast<int>() : null;
+      return CanFilter(
+        bus: bus,
+        id: id as int?,
+        ids: ids,
+        mask: mask as int?,
+        extended: extended as bool?,
+        includeRemote: includeRemote,
+        includeErrors: includeErrors,
+      );
+    } on ArgumentError catch (error, stackTrace) {
+      throw PluginManifestException(
+        'Invalid "$field": ${error.message}',
+        pluginId: pluginId,
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
   }
 
   static String _requiredString(
@@ -282,7 +479,8 @@ final class PluginManifestParser {
 
   static void _validateEntrypoint(String value, {required String pluginId}) {
     final segments = value.split('/');
-    final looksAbsolute = value.startsWith('/') ||
+    final looksAbsolute =
+        value.startsWith('/') ||
         value.startsWith(r'\') ||
         RegExp(r'^[A-Za-z]:').hasMatch(value);
     if (looksAbsolute ||
@@ -302,7 +500,7 @@ final class PluginManifestParser {
 /// A validated, duplicate-free group of discovered manifests.
 final class PluginManifestCollection {
   PluginManifestCollection(Iterable<PluginManifest> manifests)
-      : manifests = List.unmodifiable(manifests) {
+    : manifests = List.unmodifiable(manifests) {
     final ids = <String>{};
     for (final manifest in this.manifests) {
       if (!ids.add(manifest.id)) {

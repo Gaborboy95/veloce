@@ -20,10 +20,9 @@ final class PluginWatcher {
   Future<void> start() async {
     if (_subscription != null) return;
     if (!await _pluginRoot.exists()) await _pluginRoot.create(recursive: true);
-    _subscription = _pluginRoot.watch(recursive: true).listen(
-          _onEvent,
-          onError: _changes.addError,
-        );
+    _subscription = _pluginRoot
+        .watch(recursive: true)
+        .listen(_onEvent, onError: _changes.addError);
   }
 
   void _onEvent(FileSystemEvent event) {
@@ -39,10 +38,12 @@ final class PluginWatcher {
   String? pluginDirectoryFor(String changedPath) {
     final rootPath = _withTrailingSeparator(_pluginRoot.path);
     final targetPath = File(changedPath).absolute.path;
-    final normalizedRoot =
-        Platform.isWindows ? rootPath.toLowerCase() : rootPath;
-    final normalizedTarget =
-        Platform.isWindows ? targetPath.toLowerCase() : targetPath;
+    final normalizedRoot = Platform.isWindows
+        ? rootPath.toLowerCase()
+        : rootPath;
+    final normalizedTarget = Platform.isWindows
+        ? targetPath.toLowerCase()
+        : targetPath;
     if (!normalizedTarget.startsWith(normalizedRoot)) return null;
     final relativePath = targetPath.substring(rootPath.length);
     if (relativePath.isEmpty) return null;
@@ -53,8 +54,8 @@ final class PluginWatcher {
 
   static String _withTrailingSeparator(String path) =>
       path.endsWith(Platform.pathSeparator)
-          ? path
-          : '$path${Platform.pathSeparator}';
+      ? path
+      : '$path${Platform.pathSeparator}';
 
   Future<void> close() async {
     await _subscription?.cancel();

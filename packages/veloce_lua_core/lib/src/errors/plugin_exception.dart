@@ -118,9 +118,27 @@ final class PluginStorageException extends PluginException {
   }) : super(phase: PluginLifecyclePhase.storage);
 }
 
-final class StalePluginCallbackException extends PluginApiException {
-  const StalePluginCallbackException(
+final class PluginInstallationException extends PluginException {
+  const PluginInstallationException(
+    super.message, {
+    super.pluginId,
+    super.filename,
+    super.cause,
+    super.causeStackTrace,
+  }) : super(phase: PluginLifecyclePhase.installation);
+}
+
+final class PluginAssetException extends PluginException {
+  const PluginAssetException(
     super.message, {
     required super.pluginId,
-  }) : super(phase: PluginLifecyclePhase.callback);
+    super.filename,
+    super.cause,
+    super.causeStackTrace,
+  }) : super(phase: PluginLifecyclePhase.running);
+}
+
+final class StalePluginCallbackException extends PluginApiException {
+  const StalePluginCallbackException(super.message, {required super.pluginId})
+    : super(phase: PluginLifecyclePhase.callback);
 }

@@ -8,5 +8,14 @@
     "logging",
     "can.read",
     "vehicle.write"
-  ]
+  ],
+  "can": {
+    "read": [
+      {
+        "bus": "comfort",
+        "id": 640,
+        "mask": 2047
+      }
+    ]
+  }
 }

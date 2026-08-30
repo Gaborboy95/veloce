@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:developer' as developer;
 import 'dart:ffi';
 import 'dart:io';
 import 'dart:typed_data';
@@ -44,6 +45,28 @@ final class DemoCanInputController {
     final socketCanInterface =
         environment['VELOCE_SOCKETCAN_INTERFACE'] ?? 'can0';
     final lawicelPort = environment['VELOCE_LAWICEL_PORT'];
+
+    // Log out environment variables for clarity in the demo.
+    developer.log('VELOCE_CAN_INPUT=$mode', name: 'veloce.can');
+    developer.log('VELOCE_CAN_BUS=$logicalBus', name: 'veloce.can');
+    if (mode == 'socketcan' || (mode == 'auto' && Platform.isLinux)) {
+      developer.log(
+        'VELOCE_SOCKETCAN_INTERFACE=$socketCanInterface',
+        name: 'veloce.can',
+      );
+    }
+    if (mode == 'lawicel' || (mode == 'auto' && Platform.isWindows)) {
+      developer.log('VELOCE_LAWICEL_PORT=$lawicelPort', name: 'veloce.can');
+      developer.log(
+        'VELOCE_LAWICEL_SERIAL_BAUD='
+        '${environment['VELOCE_LAWICEL_SERIAL_BAUD'] ?? 115200}',
+        name: 'veloce.can',
+      );
+      developer.log(
+        'VELOCE_CAN_BITRATE=${environment['VELOCE_CAN_BITRATE'] ?? 500000}',
+        name: 'veloce.can',
+      );
+    }
 
     final _CanInputTransport? transport = switch (mode) {
       'memory' => null,
@@ -99,6 +122,12 @@ final class DemoCanInputController {
       ),
     };
 
+    // log transport selection for clarity in the demo.
+    developer.log(
+      'Selected CAN input transport: ${transport?.description ?? 'None'}',
+      name: 'veloce.can',
+    );
+
     if (transport == null) return DemoCanInputController.memory();
     return DemoCanInputController._(
       transport,
@@ -143,6 +172,14 @@ final class DemoCanInputController {
     }
   }
 
+  Future<void> send(CanFrame frame) async {
+    if (_closed) throw StateError('CAN input controller is closed.');
+    if (frame.isError) {
+      throw ArgumentError('Controller error frames cannot be transmitted.');
+    }
+    await _transport?.send(frame);
+  }
+
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -181,7 +218,52 @@ abstract interface class _CanInputTransport {
   String get description;
   Stream<CanFrame> get frames;
   Future<void> start();
+  Future<void> send(CanFrame frame);
   Future<void> close();
+}
+
+/// Example-only provider decorator which routes authorized writes to the
+/// selected physical transport while retaining the in-memory test surface.
+final class DemoCanTransportProvider implements CanProvider {
+  DemoCanTransportProvider({required this.memory, required this.controller});
+
+  final InMemoryCanProvider memory;
+  final DemoCanInputController controller;
+  Future<void> _sendTail = Future<void>.value();
+
+  @override
+  bool get writesEnabled => memory.writesEnabled;
+
+  @override
+  Future<CanSubscription> subscribe({
+    required String ownerId,
+    required CanFilter filter,
+    required CanFrameHandler onFrame,
+  }) => memory.subscribe(ownerId: ownerId, filter: filter, onFrame: onFrame);
+
+  @override
+  Future<void> send({required String ownerId, required CanFrame frame}) {
+    final completer = Completer<void>();
+    _sendTail = _sendTail.then((_) async {
+      try {
+        await controller.send(frame);
+        await memory.send(ownerId: ownerId, frame: frame);
+        completer.complete();
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  @override
+  Future<void> removeOwner(String ownerId) => memory.removeOwner(ownerId);
+
+  @override
+  Future<void> close() async {
+    await _sendTail;
+    await memory.close();
+  }
 }
 
 final class _SocketCanTransport implements _CanInputTransport {
@@ -258,6 +340,19 @@ final class _SocketCanTransport implements _CanInputTransport {
         calloc.free(enableFd);
       }
 
+      final errorMask = calloc<Uint32>()..value = _canExtendedMask;
+      try {
+        bindings.setSockOpt(
+          _socket,
+          _solCanRaw,
+          _canRawErrorFilter,
+          errorMask.cast(),
+          sizeOf<Uint32>(),
+        );
+      } finally {
+        calloc.free(errorMask);
+      }
+
       _buffer = calloc<Uint8>(_canFdFrameSize);
       _poller = Timer.periodic(
         const Duration(milliseconds: 4),
@@ -290,12 +385,37 @@ final class _SocketCanTransport implements _CanInputTransport {
       final bytes = buffer.asTypedList(length);
       final data = ByteData.sublistView(bytes);
       final rawId = data.getUint32(0, Endian.host);
-      if ((rawId & (_canRtrFlag | _canErrorFlag)) != 0) continue;
+      final payloadLength = bytes[4];
+      if ((rawId & _canErrorFlag) != 0) {
+        if (payloadLength > 8) continue;
+        _frames.add(
+          CanFrame.error(
+            bus: logicalBus,
+            errorFlags: rawId & _canExtendedMask,
+            data: Uint8List.fromList(bytes.sublist(8, 8 + payloadLength)),
+            timestampMicros: DateTime.now().microsecondsSinceEpoch,
+          ),
+        );
+        continue;
+      }
       final extended = (rawId & _canExtendedFlag) != 0;
       final id = rawId & (extended ? _canExtendedMask : _canStandardMask);
-      final payloadLength = bytes[4];
       final maximumPayload = length == _canFdFrameSize ? 64 : 8;
       if (payloadLength > maximumPayload) continue;
+
+      if ((rawId & _canRtrFlag) != 0) {
+        if (length != _canFrameSize || payloadLength > 8) continue;
+        _frames.add(
+          CanFrame.remote(
+            bus: logicalBus,
+            id: id,
+            remoteLength: payloadLength,
+            extended: extended,
+            timestampMicros: DateTime.now().microsecondsSinceEpoch,
+          ),
+        );
+        continue;
+      }
 
       _frames.add(
         CanFrame(
@@ -306,6 +426,42 @@ final class _SocketCanTransport implements _CanInputTransport {
           timestampMicros: DateTime.now().microsecondsSinceEpoch,
         ),
       );
+    }
+  }
+
+  @override
+  Future<void> send(CanFrame frame) async {
+    final bindings = _bindings;
+    if (_socket < 0 || bindings == null) {
+      throw StateError('SocketCAN transport is not open.');
+    }
+    if (frame.bus != logicalBus) {
+      throw ArgumentError.value(frame.bus, 'bus', 'Wrong logical CAN bus');
+    }
+    final useFd = frame.isData && frame.length > 8;
+    if (frame.isRemote && useFd) {
+      throw ArgumentError('CAN-FD does not support RTR frames.');
+    }
+    final length = useFd ? _canFdFrameSize : _canFrameSize;
+    final buffer = calloc<Uint8>(length);
+    try {
+      final bytes = buffer.asTypedList(length);
+      final data = ByteData.sublistView(bytes);
+      var rawId = frame.id;
+      if (frame.extended) rawId |= _canExtendedFlag;
+      if (frame.isRemote) rawId |= _canRtrFlag;
+      data.setUint32(0, rawId, Endian.host);
+      bytes[4] = frame.isRemote ? frame.remoteLength! : frame.length;
+      if (frame.isData) bytes.setRange(8, 8 + frame.length, frame.data);
+      final written = bindings.send(_socket, buffer.cast(), length, 0);
+      if (written != length) {
+        throw FileSystemException(
+          'Could not send SocketCAN frame (errno ${bindings.errno})',
+          interfaceName,
+        );
+      }
+    } finally {
+      calloc.free(buffer);
     }
   }
 
@@ -456,6 +612,14 @@ final class _LawicelSerialTransport implements _CanInputTransport {
   }
 
   @override
+  Future<void> send(CanFrame frame) {
+    if (frame.bus != logicalBus) {
+      throw ArgumentError.value(frame.bus, 'bus', 'Wrong logical CAN bus');
+    }
+    return _command(LawicelCodec.encode(frame));
+  }
+
+  @override
   Future<void> close() async {
     if (_closed) return;
     _closed = true;
@@ -486,16 +650,19 @@ final class _LawicelSerialTransport implements _CanInputTransport {
   }
 }
 
-/// Parser for LAWICEL/SLCAN `t` and `T` data-frame records.
+/// Codec for LAWICEL/SLCAN data (`t`/`T`) and RTR (`r`/`R`) records.
 abstract final class LawicelCodec {
   static CanFrame? tryParse(String record, {required String bus}) {
     if (record.isEmpty) return null;
-    final extended = switch (record.codeUnitAt(0)) {
-      0x74 => false, // t
-      0x54 => true, // T
+    final kind = switch (record.codeUnitAt(0)) {
+      0x74 => (extended: false, remote: false), // t
+      0x54 => (extended: true, remote: false), // T
+      0x72 => (extended: false, remote: true), // r
+      0x52 => (extended: true, remote: true), // R
       _ => null,
     };
-    if (extended == null) return null;
+    if (kind == null) return null;
+    final extended = kind.extended;
 
     final idDigits = extended ? 8 : 3;
     final headerLength = 1 + idDigits + 1;
@@ -506,7 +673,7 @@ abstract final class LawicelCodec {
       radix: 16,
     );
     if (id == null || dataLength == null || dataLength > 8) return null;
-    final payloadEnd = headerLength + dataLength * 2;
+    final payloadEnd = headerLength + (kind.remote ? 0 : dataLength * 2);
     if (record.length != payloadEnd && record.length != payloadEnd + 4) {
       return null;
     }
@@ -526,16 +693,46 @@ abstract final class LawicelCodec {
     if (record.length == payloadEnd + 4 && timestamp == null) return null;
 
     try {
-      return CanFrame(
-        bus: bus,
-        id: id,
-        data: payload,
-        extended: extended,
-        timestampMicros: timestamp == null ? null : timestamp * 1000,
-      );
+      return kind.remote
+          ? CanFrame.remote(
+              bus: bus,
+              id: id,
+              remoteLength: dataLength,
+              extended: extended,
+              timestampMicros: timestamp == null ? null : timestamp * 1000,
+            )
+          : CanFrame(
+              bus: bus,
+              id: id,
+              data: payload,
+              extended: extended,
+              timestampMicros: timestamp == null ? null : timestamp * 1000,
+            );
     } on ArgumentError {
       return null;
     }
+  }
+
+  static String encode(CanFrame frame) {
+    if (frame.isError) {
+      throw ArgumentError('LAWICEL cannot transmit controller error frames.');
+    }
+    if (frame.isData && frame.length > 8) {
+      throw ArgumentError('Classic LAWICEL does not support CAN-FD payloads.');
+    }
+    final command = frame.isRemote
+        ? (frame.extended ? 'R' : 'r')
+        : (frame.extended ? 'T' : 't');
+    final idWidth = frame.extended ? 8 : 3;
+    final id = frame.id.toRadixString(16).padLeft(idWidth, '0').toUpperCase();
+    final length = frame.isRemote ? frame.remoteLength! : frame.length;
+    final payload = frame.isData
+        ? frame.data
+              .map((byte) => byte.toRadixString(16).padLeft(2, '0'))
+              .join()
+              .toUpperCase()
+        : '';
+    return '$command$id$length$payload';
   }
 }
 
@@ -544,6 +741,7 @@ final class _LinuxSocketBindings {
     : socket = library.lookupFunction<_SocketNative, _SocketDart>('socket'),
       bind = library.lookupFunction<_BindNative, _BindDart>('bind'),
       receive = library.lookupFunction<_ReceiveNative, _ReceiveDart>('recv'),
+      send = library.lookupFunction<_SendNative, _SendDart>('send'),
       setSockOpt = library.lookupFunction<_SetSockOptNative, _SetSockOptDart>(
         'setsockopt',
       ),
@@ -572,6 +770,7 @@ final class _LinuxSocketBindings {
   final _SocketDart socket;
   final _BindDart bind;
   final _ReceiveDart receive;
+  final _SendDart send;
   final _SetSockOptDart setSockOpt;
   final _CloseDart closeSocket;
   final _IfNameToIndexDart ifNameToIndex;
@@ -586,6 +785,8 @@ typedef _BindNative = Int32 Function(Int32, Pointer<Void>, Uint32);
 typedef _BindDart = int Function(int, Pointer<Void>, int);
 typedef _ReceiveNative = IntPtr Function(Int32, Pointer<Void>, UintPtr, Int32);
 typedef _ReceiveDart = int Function(int, Pointer<Void>, int, int);
+typedef _SendNative = IntPtr Function(Int32, Pointer<Void>, UintPtr, Int32);
+typedef _SendDart = int Function(int, Pointer<Void>, int, int);
 typedef _SetSockOptNative = Int32 Function(
   Int32,
   Int32,
@@ -608,6 +809,7 @@ const _sockCloseOnExec = 0x80000;
 const _canRaw = 1;
 const _solCanRaw = 101;
 const _canRawFdFrames = 5;
+const _canRawErrorFilter = 2;
 const _sockaddrCanSize = 16;
 const _canFrameSize = 16;
 const _canFdFrameSize = 72;

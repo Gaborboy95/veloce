@@ -88,10 +88,7 @@ final class PluginExtensionRegistry {
       );
     }
     _changes.add(
-      PluginExtensionChange(
-        extensionPoint: extensionPoint,
-        pluginId: pluginId,
-      ),
+      PluginExtensionChange(extensionPoint: extensionPoint, pluginId: pluginId),
     );
   }
 
@@ -104,10 +101,7 @@ final class PluginExtensionRegistry {
     final removed = _byPoint[extensionPoint]?.remove(_key(pluginId, id));
     if (removed == null) return false;
     _changes.add(
-      PluginExtensionChange(
-        extensionPoint: extensionPoint,
-        pluginId: pluginId,
-      ),
+      PluginExtensionChange(extensionPoint: extensionPoint, pluginId: pluginId),
     );
     return true;
   }
@@ -141,7 +135,8 @@ final class PluginExtensionRegistry {
       );
 
   Stream<List<PluginExtension<T>>> watch<T extends Object>(
-      String point) async* {
+    String point,
+  ) async* {
     yield extensions<T>(point);
     await for (final change in changes) {
       if (change.extensionPoint == point) yield extensions<T>(point);

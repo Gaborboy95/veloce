@@ -6,6 +6,7 @@
 #if defined(_WIN32)
 #include <windows.h>
 #else
+#include <pthread.h>
 #include <time.h>
 #endif
 
@@ -26,6 +27,129 @@ struct veloce_lua_state {
   uint64_t deadline_ms;
   char *last_error;
 };
+
+struct veloce_lua_rpc {
+#if defined(_WIN32)
+  CRITICAL_SECTION mutex;
+  CONDITION_VARIABLE condition;
+#else
+  pthread_mutex_t mutex;
+  pthread_cond_t condition;
+#endif
+  int completed;
+  uint8_t *response;
+  uint64_t response_length;
+};
+
+veloce_lua_rpc *veloce_lua_rpc_create(void) {
+  veloce_lua_rpc *rpc = (veloce_lua_rpc *)calloc(1, sizeof(veloce_lua_rpc));
+  if (rpc == NULL) {
+    return NULL;
+  }
+#if defined(_WIN32)
+  InitializeCriticalSection(&rpc->mutex);
+  InitializeConditionVariable(&rpc->condition);
+#else
+  if (pthread_mutex_init(&rpc->mutex, NULL) != 0) {
+    free(rpc);
+    return NULL;
+  }
+  if (pthread_cond_init(&rpc->condition, NULL) != 0) {
+    pthread_mutex_destroy(&rpc->mutex);
+    free(rpc);
+    return NULL;
+  }
+#endif
+  return rpc;
+}
+
+void veloce_lua_rpc_wait(veloce_lua_rpc *rpc) {
+  if (rpc == NULL) {
+    return;
+  }
+#if defined(_WIN32)
+  EnterCriticalSection(&rpc->mutex);
+  while (!rpc->completed) {
+    SleepConditionVariableCS(&rpc->condition, &rpc->mutex, INFINITE);
+  }
+  LeaveCriticalSection(&rpc->mutex);
+#else
+  pthread_mutex_lock(&rpc->mutex);
+  while (!rpc->completed) {
+    pthread_cond_wait(&rpc->condition, &rpc->mutex);
+  }
+  pthread_mutex_unlock(&rpc->mutex);
+#endif
+}
+
+int32_t veloce_lua_rpc_complete(veloce_lua_rpc *rpc,
+                                const uint8_t *response,
+                                uint64_t response_length) {
+  if (rpc == NULL || (response == NULL && response_length != 0)) {
+    return 0;
+  }
+  uint8_t *copy = NULL;
+  if (response_length > 0) {
+    copy = (uint8_t *)malloc((size_t)response_length);
+    if (copy == NULL) {
+      return 0;
+    }
+    memcpy(copy, response, (size_t)response_length);
+  }
+#if defined(_WIN32)
+  EnterCriticalSection(&rpc->mutex);
+#else
+  pthread_mutex_lock(&rpc->mutex);
+#endif
+  if (rpc->completed) {
+#if defined(_WIN32)
+    LeaveCriticalSection(&rpc->mutex);
+#else
+    pthread_mutex_unlock(&rpc->mutex);
+#endif
+    free(copy);
+    return 0;
+  }
+  rpc->response = copy;
+  rpc->response_length = response_length;
+  rpc->completed = 1;
+#if defined(_WIN32)
+  WakeConditionVariable(&rpc->condition);
+  LeaveCriticalSection(&rpc->mutex);
+#else
+  pthread_cond_signal(&rpc->condition);
+  pthread_mutex_unlock(&rpc->mutex);
+#endif
+  return 1;
+}
+
+const uint8_t *veloce_lua_rpc_response(veloce_lua_rpc *rpc,
+                                       uint64_t *response_length) {
+  if (rpc == NULL || !rpc->completed) {
+    if (response_length != NULL) {
+      *response_length = 0;
+    }
+    return NULL;
+  }
+  if (response_length != NULL) {
+    *response_length = rpc->response_length;
+  }
+  return rpc->response;
+}
+
+void veloce_lua_rpc_destroy(veloce_lua_rpc *rpc) {
+  if (rpc == NULL) {
+    return;
+  }
+#if defined(_WIN32)
+  DeleteCriticalSection(&rpc->mutex);
+#else
+  pthread_cond_destroy(&rpc->condition);
+  pthread_mutex_destroy(&rpc->mutex);
+#endif
+  free(rpc->response);
+  free(rpc);
+}
 
 static uint64_t veloce_monotonic_ms(void) {
 #if defined(_WIN32)

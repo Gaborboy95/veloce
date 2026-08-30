@@ -9,11 +9,17 @@ void main() {
     expect(filter.ids, isEmpty);
     expect(filter.matchesAllIds, isTrue);
     expect(
-        filter.matches(CanFrame(bus: 'comfort', id: 0x001, data: [])), isTrue);
+      filter.matches(CanFrame(bus: 'comfort', id: 0x001, data: [])),
+      isTrue,
+    );
     expect(
-        filter.matches(CanFrame(bus: 'comfort', id: 0x7ff, data: [])), isTrue);
-    expect(filter.matches(CanFrame(bus: 'powertrain', id: 0x001, data: [])),
-        isFalse);
+      filter.matches(CanFrame(bus: 'comfort', id: 0x7ff, data: [])),
+      isTrue,
+    );
+    expect(
+      filter.matches(CanFrame(bus: 'powertrain', id: 0x001, data: [])),
+      isFalse,
+    );
   });
 
   test('filter accepts any identifier in an ID array', () {
@@ -27,11 +33,17 @@ void main() {
     expect(filter.id, isNull);
     expect(filter.ids, [0x280, 0x300]);
     expect(
-        filter.matches(CanFrame(bus: 'comfort', id: 0x28f, data: [])), isTrue);
+      filter.matches(CanFrame(bus: 'comfort', id: 0x28f, data: [])),
+      isTrue,
+    );
     expect(
-        filter.matches(CanFrame(bus: 'comfort', id: 0x30a, data: [])), isTrue);
+      filter.matches(CanFrame(bus: 'comfort', id: 0x30a, data: [])),
+      isTrue,
+    );
     expect(
-        filter.matches(CanFrame(bus: 'comfort', id: 0x310, data: [])), isFalse);
+      filter.matches(CanFrame(bus: 'comfort', id: 0x310, data: [])),
+      isFalse,
+    );
   });
 
   test('single id and ids array are mutually exclusive', () {
@@ -41,13 +53,43 @@ void main() {
     );
   });
 
+  test('RTR and controller errors are explicit and opt-in to filters', () {
+    final remote = CanFrame.remote(bus: 'comfort', id: 0x280, remoteLength: 4);
+    final error = CanFrame.error(
+      bus: 'comfort',
+      errorFlags: 0x04,
+      data: const [1, 2],
+    );
+
+    expect(remote.kind, CanFrameKind.remote);
+    expect(remote.remoteLength, 4);
+    expect(error.kind, CanFrameKind.error);
+    expect(error.errorFlags, 0x04);
+    expect(CanFilter(bus: 'comfort').matches(remote), isFalse);
+    expect(CanFilter(bus: 'comfort').matches(error), isFalse);
+    expect(
+      CanFilter(bus: 'comfort', id: 0x280, includeRemote: true).matches(remote),
+      isTrue,
+    );
+    expect(
+      CanFilter(bus: 'comfort', includeErrors: true).matches(error),
+      isTrue,
+    );
+  });
+
   test('authorization coverage respects wildcard and ID-set breadth', () {
     final wildcard = CanFilter(bus: 'comfort');
-    final allowedIds =
-        CanFilter(bus: 'comfort', ids: const [0x280, 0x300], mask: 0x7ff);
+    final allowedIds = CanFilter(
+      bus: 'comfort',
+      ids: const [0x280, 0x300],
+      mask: 0x7ff,
+    );
     final oneAllowedId = CanFilter(bus: 'comfort', id: 0x280, mask: 0x7ff);
-    final mixedIds =
-        CanFilter(bus: 'comfort', ids: const [0x280, 0x400], mask: 0x7ff);
+    final mixedIds = CanFilter(
+      bus: 'comfort',
+      ids: const [0x280, 0x400],
+      mask: 0x7ff,
+    );
 
     expect(wildcard.covers(allowedIds), isTrue);
     expect(wildcard.covers(CanFilter(bus: 'comfort')), isTrue);
@@ -97,12 +139,8 @@ void main() {
       ..setGrant(
         'dev.example.decoder',
         CanAccessGrant(
-          readFilters: [
-            CanFilter(bus: 'comfort', id: 0x280, mask: 0x7f0),
-          ],
-          writeFilters: [
-            CanFilter(bus: 'comfort', id: 0x500, mask: 0x7ff),
-          ],
+          readFilters: [CanFilter(bus: 'comfort', id: 0x280, mask: 0x7f0)],
+          writeFilters: [CanFilter(bus: 'comfort', id: 0x500, mask: 0x7ff)],
           maxSendRatePerSecond: 1,
         ),
       );

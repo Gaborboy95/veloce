@@ -29,14 +29,47 @@ final class PluginTab {
   final PluginCallbackRef? renderCallback;
 }
 
+abstract final class PluginUiExtensionPoints {
+  static const settingsPages = 'ui.settings.pages';
+  static const quickControls = 'ui.quick_controls';
+  static const statusWidgets = 'ui.status.widgets';
+  static const notifications = 'ui.notifications';
+
+  static const all = {
+    settingsPages,
+    quickControls,
+    statusWidgets,
+    notifications,
+  };
+}
+
+/// Declarative contribution to a non-tab Flutter extension point.
+final class PluginUiContribution {
+  const PluginUiContribution({
+    required this.extensionPoint,
+    required this.pluginId,
+    required this.id,
+    required this.content,
+    this.title,
+    this.iconName,
+  });
+
+  final String extensionPoint;
+  final String pluginId;
+  final String id;
+  final String? title;
+  final String? iconName;
+  final PluginUiNode content;
+}
+
 /// Typed tab facade over the generic extension registry.
 final class PluginUiRegistry {
   PluginUiRegistry({
     PluginExtensionRegistry? extensions,
     PluginUiValidator validator = const PluginUiValidator(),
-  })  : extensions = extensions ?? PluginExtensionRegistry(),
-        _ownsExtensions = extensions == null,
-        _validator = validator;
+  }) : extensions = extensions ?? PluginExtensionRegistry(),
+       _ownsExtensions = extensions == null,
+       _validator = validator;
 
   static const tabsExtensionPoint = 'ui.tabs';
 
@@ -49,8 +82,23 @@ final class PluginUiRegistry {
       .map((extension) => extension.value)
       .toList(growable: false);
 
-  Stream<List<PluginTab>> get tabs =>
-      extensions.watch<PluginTab>(tabsExtensionPoint).map(
+  Stream<List<PluginTab>> get tabs => extensions
+      .watch<PluginTab>(tabsExtensionPoint)
+      .map(
+        (items) =>
+            items.map((extension) => extension.value).toList(growable: false),
+      );
+
+  List<PluginUiContribution> currentContributions(String extensionPoint) =>
+      extensions
+          .extensions<PluginUiContribution>(extensionPoint)
+          .map((extension) => extension.value)
+          .toList(growable: false);
+
+  Stream<List<PluginUiContribution>> contributions(String extensionPoint) =>
+      extensions
+          .watch<PluginUiContribution>(extensionPoint)
+          .map(
             (items) => items
                 .map((extension) => extension.value)
                 .toList(growable: false),
@@ -64,6 +112,48 @@ final class PluginUiRegistry {
         pluginId: tab.pluginId,
         id: tab.id,
         value: tab,
+      ),
+    );
+  }
+
+  void registerContribution(PluginUiContribution contribution) {
+    _validateContribution(contribution);
+    extensions.register(
+      PluginExtension<PluginUiContribution>(
+        extensionPoint: contribution.extensionPoint,
+        pluginId: contribution.pluginId,
+        id: contribution.id,
+        value: contribution,
+      ),
+    );
+  }
+
+  void replacePluginContributions(
+    String pluginId,
+    String extensionPoint,
+    Iterable<PluginUiContribution> contributions,
+  ) {
+    final replacements = contributions.toList(growable: false);
+    for (final contribution in replacements) {
+      if (contribution.pluginId != pluginId ||
+          contribution.extensionPoint != extensionPoint) {
+        throw PluginApiException(
+          'Cannot register a UI contribution for another owner or point.',
+          pluginId: pluginId,
+        );
+      }
+      _validateContribution(contribution);
+    }
+    extensions.replaceForPlugin<PluginUiContribution>(
+      extensionPoint: extensionPoint,
+      pluginId: pluginId,
+      extensions: replacements.map(
+        (item) => PluginExtension<PluginUiContribution>(
+          extensionPoint: extensionPoint,
+          pluginId: pluginId,
+          id: item.id,
+          value: item,
+        ),
       ),
     );
   }
@@ -132,5 +222,21 @@ final class PluginUiRegistry {
         pluginId: tab.pluginId,
       );
     }
+  }
+
+  void _validateContribution(PluginUiContribution contribution) {
+    if (!PluginUiExtensionPoints.all.contains(contribution.extensionPoint) ||
+        contribution.pluginId.trim().isEmpty ||
+        contribution.id.isEmpty ||
+        contribution.id.length > 128 ||
+        !RegExp(r'^[A-Za-z0-9_.-]+$').hasMatch(contribution.id) ||
+        (contribution.title?.length ?? 0) > 128 ||
+        (contribution.iconName?.length ?? 0) > 128) {
+      throw PluginApiException(
+        'Invalid plugin UI contribution metadata.',
+        pluginId: contribution.pluginId,
+      );
+    }
+    _validator.validate(contribution.content, pluginId: contribution.pluginId);
   }
 }

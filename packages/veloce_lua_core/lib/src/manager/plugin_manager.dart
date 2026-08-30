@@ -3,6 +3,7 @@ import 'dart:io';
 
 import '../api/built_in_plugin_apis.dart';
 import '../api/plugin_api_registry.dart';
+import '../assets/plugin_assets.dart';
 import '../callbacks/plugin_callback_registry.dart';
 import '../can/can_provider.dart';
 import '../errors/plugin_exception.dart';
@@ -36,10 +37,12 @@ final class PluginManager {
     CanAuthorizationPolicy? canAuthorizationPolicy,
     PluginUiRegistry? uiRegistry,
     PluginStorageProvider? storageProvider,
+    PluginAssetProvider? assetProvider,
     PluginLogManager? logManager,
     PluginWatcher? watcher,
   }) {
-    final capabilities = apiRegistry?.capabilityManager ??
+    final capabilities =
+        apiRegistry?.capabilityManager ??
         capabilityManager ??
         CapabilityManager();
     if (apiRegistry != null &&
@@ -52,11 +55,14 @@ final class PluginManager {
     final events = eventBus ?? PluginEventBus();
     final vehicle = vehicleDataBus ?? VehicleDataBus();
     final can = canProvider ?? InMemoryCanProvider();
+    final canPolicy =
+        canAuthorizationPolicy ?? ConfigurableCanAuthorizationPolicy();
     final ui = uiRegistry ?? PluginUiRegistry();
     final logs = logManager ?? PluginLogManager();
     late final PluginManager manager;
     final usesGenerationAwarePermissions = apiRegistry == null;
-    final resolvedApiRegistry = apiRegistry ??
+    final resolvedApiRegistry =
+        apiRegistry ??
         PluginApiRegistry(
           capabilityManager: capabilities,
           permissionChecker: (call, capability) {
@@ -78,9 +84,10 @@ final class PluginManager {
       eventBus: events,
       vehicleDataBus: vehicle,
       canProvider: can,
-      canAuthorizationPolicy: canAuthorizationPolicy,
+      canAuthorizationPolicy: canPolicy,
       uiRegistry: ui,
       storageProvider: storageProvider ?? MemoryPluginStorageProvider(),
+      assetProvider: assetProvider ?? const DirectoryPluginAssetProvider(),
       logManager: logs,
       watcher: watcher ?? PluginWatcher(pluginRoot: pluginRoot),
       ownsRegistry: pluginRegistry == null,
@@ -107,6 +114,7 @@ final class PluginManager {
     required this.canAuthorizationPolicy,
     required this.uiRegistry,
     required this.storageProvider,
+    required this.assetProvider,
     required this.logManager,
     required this.watcher,
     required bool ownsRegistry,
@@ -116,14 +124,14 @@ final class PluginManager {
     required bool ownsUiRegistry,
     required bool ownsLogManager,
     required bool usesGenerationAwarePermissions,
-  })  : pluginRoot = pluginRoot.absolute,
-        _ownsRegistry = ownsRegistry,
-        _ownsEventBus = ownsEventBus,
-        _ownsVehicleDataBus = ownsVehicleDataBus,
-        _ownsCanProvider = ownsCanProvider,
-        _ownsUiRegistry = ownsUiRegistry,
-        _ownsLogManager = ownsLogManager,
-        _usesGenerationAwarePermissions = usesGenerationAwarePermissions {
+  }) : pluginRoot = pluginRoot.absolute,
+       _ownsRegistry = ownsRegistry,
+       _ownsEventBus = ownsEventBus,
+       _ownsVehicleDataBus = ownsVehicleDataBus,
+       _ownsCanProvider = ownsCanProvider,
+       _ownsUiRegistry = ownsUiRegistry,
+       _ownsLogManager = ownsLogManager,
+       _usesGenerationAwarePermissions = usesGenerationAwarePermissions {
     BuiltInPluginApis(
       registry: apiRegistry,
       resolveScope: _resolveScope,
@@ -142,6 +150,7 @@ final class PluginManager {
   final CanAuthorizationPolicy? canAuthorizationPolicy;
   final PluginUiRegistry uiRegistry;
   final PluginStorageProvider storageProvider;
+  final PluginAssetProvider assetProvider;
   final PluginLogManager logManager;
   final PluginWatcher watcher;
 
@@ -229,8 +238,9 @@ final class PluginManager {
           pluginId: pluginId,
         );
       }
-      final refreshed =
-          await loader.loadDirectory(Directory(source.directoryPath));
+      final refreshed = await loader.loadDirectory(
+        Directory(source.directoryPath),
+      );
       if (refreshed.manifest.id != pluginId) {
         throw PluginReloadException(
           'A plugin ID cannot change during reload.',
@@ -500,8 +510,16 @@ final class PluginManager {
       canAuthorizationPolicy: canAuthorizationPolicy,
       uiRegistry: uiRegistry,
       storage: storage,
+      assets: await assetProvider.load(
+        pluginId: pluginId,
+        pluginDirectory: Directory(source.directoryPath),
+      ),
       storageSnapshot: await storage.snapshot(),
       logger: logManager.logger(pluginId),
+    );
+    canAuthorizationPolicy?.registerOwner(
+      scope.resourceOwnerId,
+      source.manifest.canAccess,
     );
     PluginScriptRuntime? runtime;
     try {
@@ -693,10 +711,9 @@ final class PluginManager {
   Future<void> _serialize(String pluginId, Future<void> Function() operation) {
     final previous = _operationTails[pluginId] ?? Future<void>.value();
     final completer = Completer<void>();
-    final next = previous.then((_) => operation()).then(
-          completer.complete,
-          onError: completer.completeError,
-        );
+    final next = previous
+        .then((_) => operation())
+        .then(completer.complete, onError: completer.completeError);
     late final Future<void> tail;
     tail = next.whenComplete(() {
       if (identical(_operationTails[pluginId], tail)) {
@@ -725,23 +742,21 @@ final class PluginManager {
     String pluginId,
     Object error,
     StackTrace stackTrace,
-  ) =>
-      error is PluginException
-          ? error
-          : PluginLoadException(
-              'Plugin load failed.',
-              pluginId: pluginId,
-              cause: error,
-              causeStackTrace: stackTrace,
-            );
+  ) => error is PluginException
+      ? error
+      : PluginLoadException(
+          'Plugin load failed.',
+          pluginId: pluginId,
+          cause: error,
+          causeStackTrace: stackTrace,
+        );
 
   static String? _luaStackTrace(Object error) => switch (error) {
-        PluginLuaException() => error.luaStackTrace,
-        PluginReloadException() => error.luaStackTrace,
-        PluginException() when error.cause != null =>
-          _luaStackTrace(error.cause!),
-        _ => null,
-      };
+    PluginLuaException() => error.luaStackTrace,
+    PluginReloadException() => error.luaStackTrace,
+    PluginException() when error.cause != null => _luaStackTrace(error.cause!),
+    _ => null,
+  };
 
   static String _diagnostic(PluginException error) {
     final trace = _luaStackTrace(error);

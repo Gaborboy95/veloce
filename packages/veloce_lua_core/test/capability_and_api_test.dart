@@ -12,25 +12,30 @@ PluginManifest manifestWith(Iterable<Capability> capabilities) =>
     );
 
 void main() {
-  test('requested capabilities are checked and CAN writes default to denied',
-      () {
-    final capabilities = CapabilityManager();
-    capabilities.registerPlugin(
-      manifestWith([BuiltInCapabilities.logging, BuiltInCapabilities.canWrite]),
-    );
+  test(
+    'requested capabilities are checked and CAN writes default to denied',
+    () {
+      final capabilities = CapabilityManager();
+      capabilities.registerPlugin(
+        manifestWith([
+          BuiltInCapabilities.logging,
+          BuiltInCapabilities.canWrite,
+        ]),
+      );
 
-    expect(
-      capabilities.isGranted('dev.example.test', BuiltInCapabilities.logging),
-      isTrue,
-    );
-    expect(
-      () => capabilities.require(
-        'dev.example.test',
-        BuiltInCapabilities.canWrite,
-      ),
-      throwsA(isA<PluginPermissionException>()),
-    );
-  });
+      expect(
+        capabilities.isGranted('dev.example.test', BuiltInCapabilities.logging),
+        isTrue,
+      );
+      expect(
+        () => capabilities.require(
+          'dev.example.test',
+          BuiltInCapabilities.canWrite,
+        ),
+        throwsA(isA<PluginPermissionException>()),
+      );
+    },
+  );
 
   test('API registry checks capability and preserves callback arguments', () {
     final capabilities = CapabilityManager();

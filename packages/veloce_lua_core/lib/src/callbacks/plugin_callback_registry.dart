@@ -3,9 +3,8 @@ import 'dart:async';
 import '../errors/plugin_exception.dart';
 import '../values/structured_value.dart';
 
-typedef PluginCallbackHandler = FutureOr<Object?> Function(
-  List<StructuredValue> arguments,
-);
+typedef PluginCallbackHandler =
+    FutureOr<Object?> Function(List<StructuredValue> arguments);
 
 /// Pointer-free identity implemented by script callbacks.
 abstract interface class PluginScriptCallback {

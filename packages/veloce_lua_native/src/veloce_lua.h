@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 typedef struct veloce_lua_state veloce_lua_state;
+typedef struct veloce_lua_rpc veloce_lua_rpc;
 typedef int32_t (*veloce_lua_host_callback)(void *user_data,
                                          veloce_lua_state *state);
 
@@ -84,6 +85,17 @@ VELOCE_LUA_EXPORT void veloce_lua_push_value(veloce_lua_state *state, int32_t in
 VELOCE_LUA_EXPORT int32_t veloce_lua_ref_at(veloce_lua_state *state, int32_t index);
 VELOCE_LUA_EXPORT void veloce_lua_unref(veloce_lua_state *state, int32_t ref);
 VELOCE_LUA_EXPORT uint64_t veloce_lua_memory_used(veloce_lua_state *state);
+
+/* A process-local rendezvous used by an isolate-owned Lua state to make a
+ * synchronous Lua C call while the Flutter isolate handles the request. */
+VELOCE_LUA_EXPORT veloce_lua_rpc *veloce_lua_rpc_create(void);
+VELOCE_LUA_EXPORT void veloce_lua_rpc_wait(veloce_lua_rpc *rpc);
+VELOCE_LUA_EXPORT int32_t veloce_lua_rpc_complete(veloce_lua_rpc *rpc,
+                                                  const uint8_t *response,
+                                                  uint64_t response_length);
+VELOCE_LUA_EXPORT const uint8_t *veloce_lua_rpc_response(
+    veloce_lua_rpc *rpc, uint64_t *response_length);
+VELOCE_LUA_EXPORT void veloce_lua_rpc_destroy(veloce_lua_rpc *rpc);
 
 #ifdef __cplusplus
 }

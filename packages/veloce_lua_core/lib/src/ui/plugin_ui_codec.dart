@@ -32,10 +32,7 @@ final class PluginUiNodeCodec {
 }
 
 final class _UiDecoder {
-  const _UiDecoder({
-    required this.pluginId,
-    required this.resolveCallback,
-  });
+  const _UiDecoder({required this.pluginId, required this.resolveCallback});
 
   final String pluginId;
   final PluginUiCallbackResolver resolveCallback;
@@ -60,11 +57,14 @@ final class _UiDecoder {
   }
 
   PluginTextNode _text(Map<String, Object?> map, String path) {
-    _fields(
-      map,
-      const {'type', 'text', 'font_size', 'bold', 'color', 'alignment'},
-      path,
-    );
+    _fields(map, const {
+      'type',
+      'text',
+      'font_size',
+      'bold',
+      'color',
+      'alignment',
+    }, path);
     return PluginTextNode(
       _required<String>(map, 'text', path),
       fontSize: _optionalNumber(map, 'font_size', path),
@@ -88,7 +88,9 @@ final class _UiDecoder {
     return PluginRowNode(
       _children(map, path),
       mainAxisAlignment: _mainAlignment(
-          map['main_axis_alignment'], '$path.main_axis_alignment'),
+        map['main_axis_alignment'],
+        '$path.main_axis_alignment',
+      ),
       crossAxisAlignment: _crossAlignment(
         map['cross_axis_alignment'],
         '$path.cross_axis_alignment',
@@ -102,7 +104,9 @@ final class _UiDecoder {
     return PluginColumnNode(
       _children(map, path),
       mainAxisAlignment: _mainAlignment(
-          map['main_axis_alignment'], '$path.main_axis_alignment'),
+        map['main_axis_alignment'],
+        '$path.main_axis_alignment',
+      ),
       crossAxisAlignment: _crossAlignment(
         map['cross_axis_alignment'],
         '$path.cross_axis_alignment',
@@ -111,32 +115,25 @@ final class _UiDecoder {
     );
   }
 
-  void _axisFields(Map<String, Object?> map, String path) => _fields(
-        map,
-        const {
-          'type',
-          'children',
-          'main_axis_alignment',
-          'cross_axis_alignment',
-          'spacing',
-        },
-        path,
-      );
+  void _axisFields(Map<String, Object?> map, String path) =>
+      _fields(map, const {
+        'type',
+        'children',
+        'main_axis_alignment',
+        'cross_axis_alignment',
+        'spacing',
+      }, path);
 
   PluginContainerNode _container(Map<String, Object?> map, String path) {
-    _fields(
-      map,
-      const {
-        'type',
-        'child',
-        'padding',
-        'width',
-        'height',
-        'color',
-        'alignment',
-      },
-      path,
-    );
+    _fields(map, const {
+      'type',
+      'child',
+      'padding',
+      'width',
+      'height',
+      'color',
+      'alignment',
+    }, path);
     return PluginContainerNode(
       child: map['child'] == null ? null : node(map['child'], '$path.child'),
       padding: _padding(map['padding'], '$path.padding'),
@@ -148,11 +145,13 @@ final class _UiDecoder {
   }
 
   PluginButtonNode _button(Map<String, Object?> map, String path) {
-    _fields(
-      map,
-      const {'type', 'text', 'callback', 'enabled', 'icon_name'},
-      path,
-    );
+    _fields(map, const {
+      'type',
+      'text',
+      'callback',
+      'enabled',
+      'icon_name',
+    }, path);
     return PluginButtonNode(
       text: _required<String>(map, 'text', path),
       onPressed: _callback(map, path),
@@ -162,11 +161,7 @@ final class _UiDecoder {
   }
 
   PluginSwitchNode _switch(Map<String, Object?> map, String path) {
-    _fields(
-      map,
-      const {'type', 'value', 'callback', 'label', 'enabled'},
-      path,
-    );
+    _fields(map, const {'type', 'value', 'callback', 'label', 'enabled'}, path);
     return PluginSwitchNode(
       value: _required<bool>(map, 'value', path),
       onChanged: _callback(map, path),
@@ -176,20 +171,16 @@ final class _UiDecoder {
   }
 
   PluginSliderNode _slider(Map<String, Object?> map, String path) {
-    _fields(
-      map,
-      const {
-        'type',
-        'value',
-        'min',
-        'max',
-        'divisions',
-        'label',
-        'callback',
-        'enabled',
-      },
-      path,
-    );
+    _fields(map, const {
+      'type',
+      'value',
+      'min',
+      'max',
+      'divisions',
+      'label',
+      'callback',
+      'enabled',
+    }, path);
     return PluginSliderNode(
       value: _requiredNumber(map, 'value', path),
       min: _optionalNumber(map, 'min', path) ?? 0,
@@ -255,11 +246,15 @@ final class _UiDecoder {
     if (value == null) return const PluginEdgeInsets.all(0);
     if (value is num) return PluginEdgeInsets.all(value.toDouble());
     final map = _map(value, path);
-    _fields(
-      map,
-      const {'all', 'horizontal', 'vertical', 'left', 'top', 'right', 'bottom'},
-      path,
-    );
+    _fields(map, const {
+      'all',
+      'horizontal',
+      'vertical',
+      'left',
+      'top',
+      'right',
+      'bottom',
+    }, path);
     if (map.containsKey('all')) {
       if (map.length != 1) {
         _fail('$path.all cannot be combined with other padding fields.');
@@ -375,19 +370,13 @@ final class _UiDecoder {
     });
   }
 
-  void _fields(
-    Map<String, Object?> map,
-    Set<String> allowed,
-    String path,
-  ) {
+  void _fields(Map<String, Object?> map, Set<String> allowed, String path) {
     final unknown = map.keys.where((key) => !allowed.contains(key)).toList();
     if (unknown.isNotEmpty) {
       _fail('Unknown UI fields at $path: ${unknown.join(', ')}.');
     }
   }
 
-  Never _fail(String message) => throw PluginApiException(
-        message,
-        pluginId: pluginId,
-      );
+  Never _fail(String message) =>
+      throw PluginApiException(message, pluginId: pluginId);
 }

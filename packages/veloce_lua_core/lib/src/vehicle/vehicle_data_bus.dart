@@ -223,10 +223,12 @@ final class _VehicleSubscriptionState {
     final future = completer.future;
     _drainFuture = future;
     _drain().then(completer.complete, onError: completer.completeError);
-    unawaited(future.whenComplete(() {
-      _drainFuture = null;
-      if (active && _pending != null) _startDrain();
-    }));
+    unawaited(
+      future.whenComplete(() {
+        _drainFuture = null;
+        if (active && _pending != null) _startDrain();
+      }),
+    );
   }
 
   Future<void> _drain() async {

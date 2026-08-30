@@ -52,9 +52,7 @@ void main() {
 
     expect(
       await firstChange.future.timeout(const Duration(seconds: 5)),
-      Directory(
-        '${root.path}${Platform.pathSeparator}demo',
-      ).absolute.path,
+      Directory('${root.path}${Platform.pathSeparator}demo').absolute.path,
     );
     await Future<void>.delayed(const Duration(milliseconds: 250));
     expect(notifications, 1);

@@ -48,7 +48,7 @@ void main() {
       {...base, 'entrypoint': 'lua//main.lua'},
       {
         ...base,
-        'permissions': ['unknown.permission']
+        'permissions': ['unknown.permission'],
       },
     ]) {
       expect(
@@ -62,6 +62,37 @@ void main() {
     final manifest = parser.parseString(validJson);
     expect(
       () => PluginManifestCollection([manifest, manifest]),
+      throwsA(isA<PluginManifestException>()),
+    );
+  });
+
+  test('parses scoped CAN grants and rejects write-by-default policies', () {
+    final manifest = parser.parseMap({
+      'id': 'dev.example.can',
+      'name': 'CAN plugin',
+      'version': '1.0.0',
+      'apiVersion': '1',
+      'entrypoint': 'main.lua',
+      'permissions': ['can.read'],
+      'can': {
+        'read': [
+          {
+            'bus': 'comfort',
+            'ids': [0x280, 0x300],
+            'mask': 0x7ff,
+            'includeRemote': true,
+          },
+        ],
+      },
+    });
+
+    expect(manifest.canAccess.readFilters.single.ids, [0x280, 0x300]);
+    expect(manifest.canAccess.readFilters.single.includeRemote, isTrue);
+    expect(
+      () => parser.parseMap({
+        ...manifest.toJson(),
+        'permissions': ['can.read', 'can.write'],
+      }),
       throwsA(isA<PluginManifestException>()),
     );
   });

@@ -4,11 +4,8 @@ import 'dart:collection';
 import '../values/structured_value.dart';
 
 typedef PluginEventHandler = FutureOr<void> Function(PluginEvent event);
-typedef PluginAsyncErrorHandler = void Function(
-  Object error,
-  StackTrace stackTrace,
-  String ownerId,
-);
+typedef PluginAsyncErrorHandler =
+    void Function(Object error, StackTrace stackTrace, String ownerId);
 
 enum QueueOverflowPolicy { dropOldest, dropNewest }
 
@@ -64,8 +61,8 @@ final class PluginEventBus {
     this.overflowPolicy = QueueOverflowPolicy.dropOldest,
     StructuredValueCodec codec = const StructuredValueCodec(),
     this.onHandlerError,
-  })  : assert(maxPendingPerSubscription > 0),
-        _codec = codec;
+  }) : assert(maxPendingPerSubscription > 0),
+       _codec = codec;
 
   static final RegExp _topicPattern = RegExp(
     r'^[A-Za-z0-9][A-Za-z0-9_-]*(?:\.[A-Za-z0-9][A-Za-z0-9_-]*)*$',
@@ -246,10 +243,12 @@ final class _EventSubscriptionState {
     final future = completer.future;
     _drainFuture = future;
     _drain().then(completer.complete, onError: completer.completeError);
-    unawaited(future.whenComplete(() {
-      _drainFuture = null;
-      if (active && _pending.isNotEmpty) _startDrain();
-    }));
+    unawaited(
+      future.whenComplete(() {
+        _drainFuture = null;
+        if (active && _pending.isNotEmpty) _startDrain();
+      }),
+    );
   }
 
   Future<void> _drain() async {

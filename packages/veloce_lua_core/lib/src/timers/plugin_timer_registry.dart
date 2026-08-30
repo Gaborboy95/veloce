@@ -5,16 +5,14 @@ import '../errors/plugin_exception.dart';
 import '../runtime/plugin_state.dart';
 import '../values/structured_value.dart';
 
-typedef PluginTimerCallbackInvoker = FutureOr<Object?> Function(
-  PluginCallbackRef callback,
-  List<StructuredValue> arguments,
-);
+typedef PluginTimerCallbackInvoker =
+    FutureOr<Object?> Function(
+      PluginCallbackRef callback,
+      List<StructuredValue> arguments,
+    );
 
-typedef PluginTimerErrorHandler = void Function(
-  Object error,
-  StackTrace stackTrace,
-  String pluginId,
-);
+typedef PluginTimerErrorHandler =
+    void Function(Object error, StackTrace stackTrace, String pluginId);
 
 final class PluginTimerHandle {
   const PluginTimerHandle({
@@ -39,9 +37,9 @@ final class PluginTimerRegistry {
     this.maximumDelay = const Duration(days: 1),
     this.onError,
     StructuredValueCodec codec = const StructuredValueCodec(),
-  })  : assert(maxTimers > 0),
-        _invokeCallback = invokeCallback,
-        _codec = codec;
+  }) : assert(maxTimers > 0),
+       _invokeCallback = invokeCallback,
+       _codec = codec;
 
   final String pluginId;
   final String generation;
@@ -63,25 +61,23 @@ final class PluginTimerRegistry {
     Duration delay,
     PluginCallbackRef callback, {
     List<StructuredValue> arguments = const [],
-  }) =>
-      _create(
-        delay: delay,
-        callback: callback,
-        arguments: arguments,
-        repeating: false,
-      );
+  }) => _create(
+    delay: delay,
+    callback: callback,
+    arguments: arguments,
+    repeating: false,
+  );
 
   PluginTimerHandle setInterval(
     Duration interval,
     PluginCallbackRef callback, {
     List<StructuredValue> arguments = const [],
-  }) =>
-      _create(
-        delay: interval,
-        callback: callback,
-        arguments: arguments,
-        repeating: true,
-      );
+  }) => _create(
+    delay: interval,
+    callback: callback,
+    arguments: arguments,
+    repeating: true,
+  );
 
   bool cancel(PluginTimerHandle handle) {
     if (handle.pluginId != pluginId || handle.generation != generation) {
@@ -173,20 +169,21 @@ final class PluginTimerRegistry {
     }
     owned.running = true;
     late final Future<void> invocation;
-    invocation = Future<void>.sync(() async {
-      try {
-        await _invokeCallback(owned.callback, owned.arguments);
-      } catch (error, stackTrace) {
-        try {
-          onError?.call(error, stackTrace, pluginId);
-        } catch (_) {
-          // Error reporters must not escape a timer zone.
-        }
-      }
-    }).whenComplete(() {
-      owned.running = false;
-      _inFlight.remove(invocation);
-    });
+    invocation =
+        Future<void>.sync(() async {
+          try {
+            await _invokeCallback(owned.callback, owned.arguments);
+          } catch (error, stackTrace) {
+            try {
+              onError?.call(error, stackTrace, pluginId);
+            } catch (_) {
+              // Error reporters must not escape a timer zone.
+            }
+          }
+        }).whenComplete(() {
+          owned.running = false;
+          _inFlight.remove(invocation);
+        });
     _inFlight.add(invocation);
   }
 }

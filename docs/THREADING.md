@@ -2,30 +2,49 @@
 
 ## Current model
 
-Every loaded plugin owns an independent Lua 5.4 state. A state is thread-affine:
-all entrypoint execution, lifecycle functions, API calls, event handlers,
-timers, and Flutter callback invocations for that state are serialized on the
-Dart isolate that created it. Two callbacks never execute concurrently against
-the same state.
+The demo uses `IsolatedNativeLuaRuntimeFactory`: every loaded generation owns a
+dedicated Dart isolate and an independent Lua 5.4 state. All entrypoint,
+lifecycle, event, timer, and Flutter callback execution for that state is
+serialized by its runtime. Two callbacks never execute concurrently against
+one Lua state, while different plugins can run independently.
 
-In the current prototype that owning isolate is normally the Flutter host
-isolate. Lua execution is therefore not yet offloaded to a dedicated plugin
-isolate. Instruction and wall-clock hooks bound each protected Lua call, but a
-call still occupies its owning isolate until it returns or a hook interrupts
-it. Keep handlers short and never use Lua for blocking I/O.
+```text
+Flutter UI isolate
+       │
+       ├──── Plugin A isolate ─── Lua state A
+       ├──── Plugin B isolate ─── Lua state B
+       └──── Plugin C isolate ─── Lua state C
+                │
+                ▼
+        structured messages
+```
+
+An infinite Lua loop therefore occupies only that plugin isolate until the
+native instruction/deadline hook interrupts it; it does not occupy the Flutter
+UI isolate. `NativeLuaRuntimeFactory` remains available as a direct-isolate
+implementation for tests or tightly controlled hosts, but third-party plugins
+should use the isolated factory.
 
 The host API dispatcher is synchronous because a Lua C function must put its
-results on the Lua stack before returning. A future asynchronous API must
-return a serializable handle immediately and deliver completion later through
-an event or callback; it must not retain the raw Lua stack across an `await`.
+results on the Lua stack before returning. The plugin isolate sends a structured
+request to the host and blocks its own native thread on a small process-local C
+rendezvous. The Flutter isolate performs capability/generation checks and
+signals the serialized response. It never waits for the plugin isolate. A
+genuinely asynchronous host API must still return a serializable handle and
+deliver completion later through an event or callback; it must not retain the
+raw Lua stack across an `await`.
 
 ## Native FFI callback rule
 
-The C wrapper invokes Dart only as a synchronous consequence of Dart entering
-that same Lua state. It does not invoke Dart callbacks from a native worker
-thread. A real CAN or vehicle provider must marshal an external-thread event
-onto the state's owning Dart isolate, then enter Lua through the runtime's
-serialized scheduler.
+Each plugin isolate constructs its own `NativeCallable.isolateLocal`. The C
+wrapper invokes that callback only as a synchronous consequence of the same
+isolate/thread entering its Lua state. The callback is closed before the
+isolate exits. No isolate calls another isolate's native callback, and no raw
+Lua or rendezvous pointer is exposed to Lua or the public core API.
+
+A CAN or vehicle provider delivers a Dart callback identity to the manager.
+The manager sends callback invocation data to the owning plugin isolate; it
+does not enter the Lua state from a provider/native thread.
 
 Never share a raw Lua state pointer, native callback pointer, Dart object, or
 callback closure between isolates. The public core abstraction intentionally
@@ -78,11 +97,9 @@ with an explicit finite policy; they must not call both generations.
 
 ## Hardening path
 
-The next isolation step is a dedicated long-lived Dart isolate (or an isolate
-pool) that owns all Lua FFI objects. Communication with Flutter should use only
-sendable structured messages and generation IDs. This prevents Lua work from
-occupying the UI isolate, but an isolate still shares the process and does not
-contain a native crash.
+The dedicated-isolate step is implemented. Isolates protect Flutter scheduling
+and separate plugin queues, but still share one address space and do not contain
+a native crash or enforce an OS memory/CPU quota.
 
 For untrusted third-party plugins, the stronger target is a separate restricted
 process with IPC, OS credentials, seccomp/namespace policy as available,
@@ -93,4 +110,3 @@ suited to either isolate messages or process IPC.
 Before production deployment, add load and soak tests around execution-budget
 interrupts, queue overflow, reload while events are arriving, callback teardown,
 and provider-thread marshaling on the target embedder and CPU architecture.
-

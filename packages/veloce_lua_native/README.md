@@ -6,6 +6,14 @@ into one application-owned library; it never searches for a system Lua. The
 build omits the Lua `io`, `os`, `debug`, `package/loadlib`, and coroutine
 library implementations and opens only the explicitly selected safe libraries.
 
+Use `IsolatedNativeLuaRuntimeFactory` for application plugins. It creates one
+Dart isolate and isolate-local `NativeCallable` per runtime generation. A small
+native condition-variable rendezvous lets synchronous Lua C API calls be
+permission-checked on the host isolate without blocking that host. Only
+structured values, callback IDs, plugin IDs, and generation IDs cross isolate
+ports. `NativeLuaRuntimeFactory` is the direct owning-isolate variant used by
+low-level tests and controlled embeddings.
+
 For a local Windows integration-test build from the repository root:
 
 ```powershell

@@ -62,6 +62,7 @@ set_target_properties(veloce_lua_native PROPERTIES
 )
 
 if(UNIX AND NOT APPLE)
+  find_package(Threads REQUIRED)
   target_compile_definitions(veloce_lua_native PRIVATE LUA_USE_LINUX)
-  target_link_libraries(veloce_lua_native PRIVATE m dl)
+  target_link_libraries(veloce_lua_native PRIVATE m dl Threads::Threads)
 endif()

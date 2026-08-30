@@ -2,10 +2,8 @@ import '../errors/plugin_exception.dart';
 import '../manifest/plugin_manifest.dart';
 import 'capability.dart';
 
-typedef PluginCapabilityAuthorizer = bool Function(
-  String pluginId,
-  Capability capability,
-);
+typedef PluginCapabilityAuthorizer =
+    bool Function(String pluginId, Capability capability);
 
 /// Enforces requested and host-granted permissions at every Dart API boundary.
 final class CapabilityManager {
@@ -13,11 +11,11 @@ final class CapabilityManager {
     CapabilityCatalog? catalog,
     Iterable<Capability>? enabledCapabilities,
     PluginCapabilityAuthorizer? authorizer,
-  })  : catalog = catalog ?? CapabilityCatalog.builtIn(),
-        _enabled = Set.of(
-          enabledCapabilities ?? BuiltInCapabilities.safeDefaults,
-        ),
-        _authorizer = authorizer ?? _allow;
+  }) : catalog = catalog ?? CapabilityCatalog.builtIn(),
+       _enabled = Set.of(
+         enabledCapabilities ?? BuiltInCapabilities.safeDefaults,
+       ),
+       _authorizer = authorizer ?? _allow;
 
   final CapabilityCatalog catalog;
   final Set<Capability> _enabled;
@@ -28,8 +26,10 @@ final class CapabilityManager {
 
   Set<Capability> get enabledCapabilities => Set.unmodifiable(_enabled);
 
-  void setHostCapabilityEnabled(Capability capability,
-      {required bool enabled}) {
+  void setHostCapabilityEnabled(
+    Capability capability, {
+    required bool enabled,
+  }) {
     if (catalog.tryResolve(capability.name) == null) {
       throw ArgumentError.value(capability, 'capability', 'Unknown capability');
     }
@@ -72,10 +72,10 @@ final class CapabilityManager {
       Set.unmodifiable(_requested[pluginId] ?? const <Capability>{});
 
   Set<Capability> grantedFor(String pluginId) => Set.unmodifiable(
-        requestedFor(pluginId).where(
-          (capability) => isGranted(pluginId, capability),
-        ),
-      );
+    requestedFor(
+      pluginId,
+    ).where((capability) => isGranted(pluginId, capability)),
+  );
 
   void require(String pluginId, Capability capability) {
     if (!isRequested(pluginId, capability)) {

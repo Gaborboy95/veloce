@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import '../callbacks/plugin_callback_registry.dart';
+import '../assets/plugin_assets.dart';
 import '../can/can_models.dart';
 import '../can/can_provider.dart';
 import '../events/plugin_event_bus.dart';
@@ -26,6 +27,7 @@ final class PluginGenerationScope {
     required this.canProvider,
     required this.uiRegistry,
     required this.storage,
+    required this.assets,
     required Map<String, StructuredValue> storageSnapshot,
     required this.logger,
     this.canAuthorizationPolicy,
@@ -39,6 +41,7 @@ final class PluginGenerationScope {
   final CanAuthorizationPolicy? canAuthorizationPolicy;
   final PluginUiRegistry uiRegistry;
   final PluginStorage storage;
+  final PluginAssetBundle assets;
   final PluginLogger logger;
 
   final List<PluginEventSubscription> _eventSubscriptions = [];
@@ -47,6 +50,7 @@ final class PluginGenerationScope {
   final List<Future<void>> _pendingResources = [];
   final List<void Function()> _deferredPublications = [];
   final Map<String, PluginTab> _tabs = {};
+  final Map<String, Map<String, PluginUiContribution>> _uiContributions = {};
   final Map<int, PluginCallbackRef> _callbacks = {};
   final Map<String, StructuredValue> _storageValues;
   final Map<int, _TimerSpec> _timerSpecs = {};
@@ -63,6 +67,7 @@ final class PluginGenerationScope {
   var _storageDirty = false;
 
   String get pluginId => manifest.id;
+  String get resourceOwnerId => '$pluginId@$generation';
   bool get isActive => _active && !_tearingDown && !_disposed;
   bool get isStaging => !_active && !_tearingDown && !_disposed;
   bool get isTearingDown => _tearingDown;
@@ -89,6 +94,13 @@ final class PluginGenerationScope {
     if (_active) return;
     _active = true;
     uiRegistry.replacePluginTabs(pluginId, _tabs.values);
+    for (final point in PluginUiExtensionPoints.all) {
+      uiRegistry.replacePluginContributions(
+        pluginId,
+        point,
+        _uiContributions[point]?.values ?? const [],
+      );
+    }
     _timers = _createTimerRegistry();
     for (final entry in _timerSpecs.entries) {
       _timerHandles[entry.key] = _startTimer(entry.value);
@@ -219,26 +231,26 @@ final class PluginGenerationScope {
 
   int subscribeCan(CanFilter filter, PluginScriptCallback callback) {
     _ensureMutable();
-    canAuthorizationPolicy?.requireSubscription(pluginId, filter);
+    canAuthorizationPolicy?.requireSubscription(resourceOwnerId, filter);
     final token = _canSubscriptions.length + _pendingResources.length + 1;
     final wasActive = _active;
     final rawPending = canProvider
         .subscribe(
-      ownerId: pluginId,
-      filter: filter,
-      onFrame: (frame) => Future<void>.microtask(() async {
-        if (isActive) {
-          await invokeCallback(callback, [_canFrameValue(frame)]);
-        }
-      }),
-    )
+          ownerId: resourceOwnerId,
+          filter: filter,
+          onFrame: (frame) => Future<void>.microtask(() async {
+            if (isActive) {
+              await invokeCallback(callback, [_canFrameValue(frame)]);
+            }
+          }),
+        )
         .then((subscription) async {
-      if (_disposed) {
-        await subscription.cancel();
-      } else {
-        _canSubscriptions.add(subscription);
-      }
-    });
+          if (_disposed) {
+            await subscription.cancel();
+          } else {
+            _canSubscriptions.add(subscription);
+          }
+        });
     late final Future<void> pending;
     pending = wasActive
         ? rawPending.catchError((Object error, StackTrace stackTrace) {
@@ -256,18 +268,20 @@ final class PluginGenerationScope {
     _ensureMutable();
     if (!_active) {
       throw StateError(
-          'CAN transmission is unavailable during initialization.');
+        'CAN transmission is unavailable during initialization.',
+      );
     }
     if (!canProvider.writesEnabled) {
       throw CanWriteDisabledException(pluginId: pluginId);
     }
-    canAuthorizationPolicy?.requireSend(pluginId, frame);
+    canAuthorizationPolicy?.requireSend(resourceOwnerId, frame);
     unawaited(
-      canProvider.send(ownerId: pluginId, frame: frame).catchError(
-        (Object error, StackTrace stackTrace) {
-          logger.error('CAN transmission failed: $error');
-        },
-      ),
+      canProvider.send(ownerId: resourceOwnerId, frame: frame).catchError((
+        Object error,
+        StackTrace stackTrace,
+      ) {
+        logger.error('CAN transmission failed: $error');
+      }),
     );
     return true;
   }
@@ -284,6 +298,22 @@ final class PluginGenerationScope {
     _ensureMutable();
     _tabs.remove(id);
     _publishTabsIfActive();
+  }
+
+  void registerUiContribution(PluginUiContribution contribution) {
+    _ensureMutable();
+    final byId = _uiContributions.putIfAbsent(
+      contribution.extensionPoint,
+      () => {},
+    );
+    byId[contribution.id] = contribution;
+    _publishContributionsIfActive(contribution.extensionPoint);
+  }
+
+  void unregisterUiContribution(String extensionPoint, String id) {
+    _ensureMutable();
+    _uiContributions[extensionPoint]?.remove(id);
+    _publishContributionsIfActive(extensionPoint);
   }
 
   StructuredValue storageGet(String key) => _storageValues[key];
@@ -373,6 +403,7 @@ final class PluginGenerationScope {
     await Future.wait(_eventSubscriptions.map((item) => item.cancel()));
     await Future.wait(_vehicleSubscriptions.map((item) => item.cancel()));
     await Future.wait(_canSubscriptions.map((item) => item.cancel()));
+    canAuthorizationPolicy?.removeOwner(resourceOwnerId);
     if (removeUi) uiRegistry.unregisterPlugin(pluginId);
     await flushStorage();
     _eventSubscriptions.clear();
@@ -380,6 +411,7 @@ final class PluginGenerationScope {
     _canSubscriptions.clear();
     _callbacks.clear();
     _tabs.clear();
+    _uiContributions.clear();
     _timerSpecs.clear();
     _deferredPublications.clear();
   }
@@ -387,12 +419,12 @@ final class PluginGenerationScope {
   Future<void> flushStorage() => _storageTail;
 
   PluginTimerRegistry _createTimerRegistry() => PluginTimerRegistry(
-        pluginId: pluginId,
-        generation: generation,
-        invokeCallback: (callback, arguments) =>
-            invokeCallback(callback, arguments),
-        onError: (error, _, __) => logger.error('Timer failed: $error'),
-      );
+    pluginId: pluginId,
+    generation: generation,
+    invokeCallback: (callback, arguments) =>
+        invokeCallback(callback, arguments),
+    onError: (error, _, __) => logger.error('Timer failed: $error'),
+  );
 
   PluginTimerHandle _startTimer(_TimerSpec spec) => spec.repeating
       ? _timers!.setInterval(spec.duration, spec.callback)
@@ -402,22 +434,34 @@ final class PluginGenerationScope {
     if (isActive) uiRegistry.replacePluginTabs(pluginId, _tabs.values);
   }
 
+  void _publishContributionsIfActive(String point) {
+    if (!isActive) return;
+    uiRegistry.replacePluginContributions(
+      pluginId,
+      point,
+      _uiContributions[point]?.values ?? const [],
+    );
+  }
+
   void _scheduleStorageFlush() {
     if (!_active || !_storageDirty || _disposed) return;
     _storageDirty = false;
     final snapshot = Map<String, StructuredValue>.of(_storageValues);
-    _storageTail = _storageTail.then((_) async {
-      final current = await storage.snapshot();
-      for (final key
-          in current.keys.where((key) => !snapshot.containsKey(key))) {
-        await storage.remove(key);
-      }
-      for (final entry in snapshot.entries) {
-        await storage.set(entry.key, entry.value);
-      }
-    }).catchError((Object error, StackTrace stackTrace) {
-      logger.error('Storage persistence failed: $error');
-    });
+    _storageTail = _storageTail
+        .then((_) async {
+          final current = await storage.snapshot();
+          for (final key in current.keys.where(
+            (key) => !snapshot.containsKey(key),
+          )) {
+            await storage.remove(key);
+          }
+          for (final entry in snapshot.entries) {
+            await storage.set(entry.key, entry.value);
+          }
+        })
+        .catchError((Object error, StackTrace stackTrace) {
+          logger.error('Storage persistence failed: $error');
+        });
   }
 
   void _ensureUsable() {
@@ -432,13 +476,16 @@ final class PluginGenerationScope {
   }
 
   static Map<String, Object?> _canFrameValue(CanFrame frame) => {
-        'bus': frame.bus,
-        'id': frame.id,
-        'data': frame.data.toList(growable: false),
-        'extended': frame.extended,
-        if (frame.timestampMicros != null)
-          'timestamp_micros': frame.timestampMicros,
-      };
+    'bus': frame.bus,
+    'type': frame.kind.wireName,
+    'id': frame.id,
+    'data': frame.data.toList(growable: false),
+    'extended': frame.extended,
+    if (frame.remoteLength != null) 'length': frame.remoteLength,
+    if (frame.errorFlags != null) 'error_flags': frame.errorFlags,
+    if (frame.timestampMicros != null)
+      'timestamp_micros': frame.timestampMicros,
+  };
 }
 
 final class _TimerSpec {

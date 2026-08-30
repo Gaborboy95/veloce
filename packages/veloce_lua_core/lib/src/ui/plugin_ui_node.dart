@@ -23,16 +23,16 @@ enum PluginListDirection { vertical, horizontal }
 
 final class PluginEdgeInsets {
   const PluginEdgeInsets.all(double value)
-      : left = value,
-        top = value,
-        right = value,
-        bottom = value;
+    : left = value,
+      top = value,
+      right = value,
+      bottom = value;
 
   const PluginEdgeInsets.symmetric({double horizontal = 0, double vertical = 0})
-      : left = horizontal,
-        top = vertical,
-        right = horizontal,
-        bottom = vertical;
+    : left = horizontal,
+      top = vertical,
+      right = horizontal,
+      bottom = vertical;
 
   const PluginEdgeInsets.only({
     this.left = 0,
@@ -335,7 +335,7 @@ final class PluginUiValidator {
       insets.left,
       insets.top,
       insets.right,
-      insets.bottom
+      insets.bottom,
     ]) {
       _nonNegative(value, 'padding', pluginId);
     }
@@ -347,8 +347,6 @@ final class PluginUiValidator {
     }
   }
 
-  Never _fail(String message, String pluginId) => throw PluginApiException(
-        message,
-        pluginId: pluginId,
-      );
+  Never _fail(String message, String pluginId) =>
+      throw PluginApiException(message, pluginId: pluginId);
 }

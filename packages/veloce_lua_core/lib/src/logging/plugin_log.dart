@@ -26,8 +26,8 @@ final class PluginLogManager {
   PluginLogManager({
     this.maxHistory = 1000,
     StructuredValueCodec codec = const StructuredValueCodec(),
-  })  : assert(maxHistory > 0),
-        _codec = codec;
+  }) : assert(maxHistory > 0),
+       _codec = codec;
 
   final int maxHistory;
   final StructuredValueCodec _codec;
@@ -82,9 +82,10 @@ final class PluginLogManager {
 
 /// Logger permanently scoped to a plugin, so Lua cannot spoof another owner.
 final class PluginLogger {
-  const PluginLogger._(
-      {required this.pluginId, required PluginLogManager manager})
-      : _manager = manager;
+  const PluginLogger._({
+    required this.pluginId,
+    required PluginLogManager manager,
+  }) : _manager = manager;
 
   final String pluginId;
   final PluginLogManager _manager;
@@ -101,11 +102,7 @@ final class PluginLogger {
   void error(Object? message, {StructuredValue metadata}) =>
       log(PluginLogLevel.error, message, metadata: metadata);
 
-  void log(
-    PluginLogLevel level,
-    Object? message, {
-    StructuredValue metadata,
-  }) {
+  void log(PluginLogLevel level, Object? message, {StructuredValue metadata}) {
     _manager._write(
       pluginId: pluginId,
       level: level,

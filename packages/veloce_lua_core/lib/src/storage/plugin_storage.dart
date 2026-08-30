@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:sqlite3/sqlite3.dart' as sqlite;
+
 import '../errors/plugin_exception.dart';
 import '../values/structured_value.dart';
 
@@ -20,6 +22,11 @@ abstract interface class PluginStorage {
 abstract interface class PluginStorageProvider {
   Future<PluginStorage> open(String pluginId);
   Future<void> deletePlugin(String pluginId);
+}
+
+abstract interface class ClosablePluginStorageProvider
+    implements PluginStorageProvider {
+  Future<void> close();
 }
 
 /// In-memory implementation useful for unit tests and ephemeral hosts.
@@ -144,10 +151,10 @@ final class _JsonPluginStorage implements PluginStorage {
 
   @override
   Future<void> clear() => _serialized(() async {
-        await _ensureLoaded();
-        _values.clear();
-        await _persist();
-      });
+    await _ensureLoaded();
+    _values.clear();
+    await _persist();
+  });
 
   @override
   Future<bool> containsKey(String key) {
@@ -191,9 +198,9 @@ final class _JsonPluginStorage implements PluginStorage {
 
   @override
   Future<Map<String, StructuredValue>> snapshot() => _serialized(() async {
-        await _ensureLoaded();
-        return Map.unmodifiable(_values);
-      });
+    await _ensureLoaded();
+    return Map.unmodifiable(_values);
+  });
 
   Future<T> _serialized<T>(FutureOr<T> Function() operation) {
     final completer = Completer<T>();
@@ -218,10 +225,7 @@ final class _JsonPluginStorage implements PluginStorage {
       }
       for (final entry in decoded.entries) {
         _validateStorageKey(entry.key);
-        _values[entry.key] = codec.normalize(
-          entry.value,
-          pluginId: pluginId,
-        );
+        _values[entry.key] = codec.normalize(entry.value, pluginId: pluginId);
       }
     } catch (error, stackTrace) {
       _loaded = false;
@@ -262,6 +266,196 @@ final class _JsonPluginStorage implements PluginStorage {
       );
     }
   }
+}
+
+/// SQLite-backed storage with one composite-key table for every plugin.
+///
+/// Values remain restricted to the structured Dart/Lua bridge model and are
+/// encoded as JSON. All access to the synchronous SQLite connection is
+/// serialized; a host with heavy storage traffic can wrap this provider in a
+/// dedicated storage isolate without changing [PluginStorage].
+final class SqlitePluginStorageProvider
+    implements ClosablePluginStorageProvider {
+  SqlitePluginStorageProvider({
+    required this.databaseFile,
+    StructuredValueCodec codec = const StructuredValueCodec(),
+  }) : _codec = codec;
+
+  final File databaseFile;
+  final StructuredValueCodec _codec;
+  final Map<String, _SqlitePluginStorage> _stores = {};
+  Future<void> _operationTail = Future<void>.value();
+  sqlite.Database? _database;
+  var _closed = false;
+
+  @override
+  Future<PluginStorage> open(String pluginId) async {
+    _validatePluginId(pluginId);
+    _ensureNotClosed();
+    await _ensureDatabase();
+    return _stores.putIfAbsent(
+      pluginId,
+      () => _SqlitePluginStorage(provider: this, pluginId: pluginId),
+    );
+  }
+
+  @override
+  Future<void> deletePlugin(String pluginId) {
+    _validatePluginId(pluginId);
+    return _serialized((database) {
+      database.execute('DELETE FROM plugin_storage WHERE plugin_id = ?', [
+        pluginId,
+      ]);
+      _stores.remove(pluginId);
+    });
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) return;
+    _closed = true;
+    await _operationTail;
+    _stores.clear();
+    _database?.close();
+    _database = null;
+  }
+
+  Future<T> _serialized<T>(T Function(sqlite.Database database) operation) {
+    _ensureNotClosed();
+    final completer = Completer<T>();
+    _operationTail = _operationTail.then((_) async {
+      try {
+        final database = await _ensureDatabase();
+        completer.complete(operation(database));
+      } catch (error, stackTrace) {
+        completer.completeError(error, stackTrace);
+      }
+    });
+    return completer.future;
+  }
+
+  Future<sqlite.Database> _ensureDatabase() async {
+    _ensureNotClosed();
+    if (_database case final current?) return current;
+    try {
+      await databaseFile.parent.create(recursive: true);
+      final database = sqlite.sqlite3.open(databaseFile.path);
+      database
+        ..execute('PRAGMA journal_mode = WAL')
+        ..execute('PRAGMA synchronous = NORMAL')
+        ..execute('''
+CREATE TABLE IF NOT EXISTS plugin_storage (
+  plugin_id TEXT NOT NULL,
+  storage_key TEXT NOT NULL,
+  value_json TEXT NOT NULL,
+  PRIMARY KEY (plugin_id, storage_key)
+) WITHOUT ROWID
+''');
+      _database = database;
+      return database;
+    } on Object catch (error, stackTrace) {
+      throw PluginStorageException(
+        'Could not open SQLite plugin storage.',
+        pluginId: '<host>',
+        cause: error,
+        causeStackTrace: stackTrace,
+      );
+    }
+  }
+
+  void _ensureNotClosed() {
+    if (_closed) throw StateError('SQLite plugin storage is closed.');
+  }
+}
+
+final class _SqlitePluginStorage implements PluginStorage {
+  const _SqlitePluginStorage({required this.provider, required this.pluginId});
+
+  final SqlitePluginStorageProvider provider;
+  @override
+  final String pluginId;
+
+  @override
+  Future<void> clear() => provider._serialized((database) {
+    database.execute('DELETE FROM plugin_storage WHERE plugin_id = ?', [
+      pluginId,
+    ]);
+  });
+
+  @override
+  Future<bool> containsKey(String key) {
+    _validateStorageKey(key);
+    return provider._serialized((database) {
+      final rows = database.select(
+        'SELECT 1 FROM plugin_storage '
+        'WHERE plugin_id = ? AND storage_key = ? LIMIT 1',
+        [pluginId, key],
+      );
+      return rows.isNotEmpty;
+    });
+  }
+
+  @override
+  Future<StructuredValue> get(String key) {
+    _validateStorageKey(key);
+    return provider._serialized((database) {
+      final rows = database.select(
+        'SELECT value_json FROM plugin_storage '
+        'WHERE plugin_id = ? AND storage_key = ? LIMIT 1',
+        [pluginId, key],
+      );
+      if (rows.isEmpty) return null;
+      return provider._codec.normalize(
+        jsonDecode(rows.single['value_json']! as String),
+        pluginId: pluginId,
+      );
+    });
+  }
+
+  @override
+  Future<void> remove(String key) {
+    _validateStorageKey(key);
+    return provider._serialized((database) {
+      database.execute(
+        'DELETE FROM plugin_storage '
+        'WHERE plugin_id = ? AND storage_key = ?',
+        [pluginId, key],
+      );
+    });
+  }
+
+  @override
+  Future<void> set(String key, StructuredValue value) {
+    _validateStorageKey(key);
+    final normalized = provider._codec.normalize(value, pluginId: pluginId);
+    final encoded = jsonEncode(normalized);
+    return provider._serialized((database) {
+      database.execute(
+        'INSERT INTO plugin_storage(plugin_id, storage_key, value_json) '
+        'VALUES (?, ?, ?) '
+        'ON CONFLICT(plugin_id, storage_key) DO UPDATE '
+        'SET value_json = excluded.value_json',
+        [pluginId, key, encoded],
+      );
+    });
+  }
+
+  @override
+  Future<Map<String, StructuredValue>> snapshot() =>
+      provider._serialized((database) {
+        final rows = database.select(
+          'SELECT storage_key, value_json FROM plugin_storage '
+          'WHERE plugin_id = ? ORDER BY storage_key',
+          [pluginId],
+        );
+        return Map.unmodifiable({
+          for (final row in rows)
+            row['storage_key']! as String: provider._codec.normalize(
+              jsonDecode(row['value_json']! as String),
+              pluginId: pluginId,
+            ),
+        });
+      });
 }
 
 void _validatePluginId(String pluginId) {

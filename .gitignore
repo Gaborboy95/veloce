@@ -10,7 +10,9 @@ build/
 .idea/
 **/.idea/
 *.iml
-.ivi_plugin_storage/
+.env
+**/.env
+.veloce_plugin_storage/
 
 # Native compiler output
 *.dll

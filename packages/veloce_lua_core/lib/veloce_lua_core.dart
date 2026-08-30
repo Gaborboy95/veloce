@@ -1,12 +1,14 @@
 library;
 
 export 'src/api/plugin_api_registry.dart';
+export 'src/assets/plugin_assets.dart';
 export 'src/callbacks/plugin_callback_registry.dart';
 export 'src/can/can_models.dart';
 export 'src/can/can_provider.dart';
 export 'src/errors/plugin_exception.dart';
 export 'src/events/plugin_event_bus.dart';
 export 'src/extensions/plugin_extension_registry.dart';
+export 'src/installation/plugin_installer.dart';
 export 'src/logging/plugin_log.dart';
 export 'src/manager/plugin_manager.dart';
 export 'src/loader/plugin_loader.dart';

@@ -8,7 +8,6 @@ void main() {
   final libraryPath = _findNativeLibrary();
   final repositoryRoot = Directory.current.uri.resolve('../../');
   final sourcePlugins = Directory.fromUri(repositoryRoot.resolve('plugins/'));
-  final canPolicy = ConfigurableCanAuthorizationPolicy();
 
   test(
     'three real Lua plugins form the filtered CAN to vehicle to UI pipeline',
@@ -17,20 +16,13 @@ void main() {
         'veloce-native-manager-',
       );
       await _copyDirectory(sourcePlugins, temporary);
-      canPolicy.setGrant(
-        'dev.example.can_decoder',
-        CanAccessGrant(
-          readFilters: [CanFilter(bus: 'comfort', id: 0x280, mask: 0x7ff)],
-        ),
-      );
       final canProvider = InMemoryCanProvider();
       final manager = PluginManager(
         pluginRoot: temporary,
-        runtimeFactory: NativeLuaRuntimeFactory(
-          resolver: DefaultNativeLuaLibraryResolver(libraryPath: libraryPath!),
+        runtimeFactory: IsolatedNativeLuaRuntimeFactory(
+          libraryPath: libraryPath!,
         ),
         canProvider: canProvider,
-        canAuthorizationPolicy: canPolicy,
       );
       addTearDown(() async {
         await manager.close();

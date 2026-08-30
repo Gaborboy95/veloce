@@ -5,11 +5,8 @@ import '../errors/plugin_exception.dart';
 import 'can_models.dart';
 
 typedef CanFrameHandler = FutureOr<void> Function(CanFrame frame);
-typedef CanProviderErrorHandler = void Function(
-  Object error,
-  StackTrace stackTrace,
-  String ownerId,
-);
+typedef CanProviderErrorHandler =
+    void Function(Object error, StackTrace stackTrace, String ownerId);
 
 abstract interface class CanSubscription {
   String get ownerId;
@@ -26,38 +23,14 @@ abstract interface class CanProvider {
     required CanFrameHandler onFrame,
   });
 
-  Future<void> send({
-    required String ownerId,
-    required CanFrame frame,
-  });
+  Future<void> send({required String ownerId, required CanFrame frame});
 
   Future<void> removeOwner(String ownerId);
   Future<void> close();
 }
 
-/// Read/write restrictions which can later be populated from scoped manifests.
-final class CanAccessGrant {
-  CanAccessGrant({
-    Iterable<CanFilter> readFilters = const [],
-    Iterable<CanFilter> writeFilters = const [],
-    this.maxSendRatePerSecond = 0,
-  })  : readFilters = List.unmodifiable(readFilters),
-        writeFilters = List.unmodifiable(writeFilters) {
-    if (maxSendRatePerSecond < 0) {
-      throw ArgumentError.value(
-        maxSendRatePerSecond,
-        'maxSendRatePerSecond',
-        'Must not be negative',
-      );
-    }
-  }
-
-  final List<CanFilter> readFilters;
-  final List<CanFilter> writeFilters;
-  final int maxSendRatePerSecond;
-}
-
 abstract interface class CanAuthorizationPolicy {
+  void registerOwner(String ownerId, CanAccessGrant grant);
   void requireSubscription(String ownerId, CanFilter filter);
   void requireSend(String ownerId, CanFrame frame);
   void removeOwner(String ownerId);
@@ -69,10 +42,15 @@ final class ConfigurableCanAuthorizationPolicy
   final Map<String, CanAccessGrant> _grants = {};
   final Map<String, Queue<int>> _sendTimesMicros = {};
 
-  void setGrant(String ownerId, CanAccessGrant grant) {
+  @override
+  void registerOwner(String ownerId, CanAccessGrant grant) {
     _grants[ownerId] = grant;
     _sendTimesMicros.remove(ownerId);
   }
+
+  /// Backwards-compatible host configuration name.
+  void setGrant(String ownerId, CanAccessGrant grant) =>
+      registerOwner(ownerId, grant);
 
   @override
   void requireSubscription(String ownerId, CanFilter filter) {
@@ -82,7 +60,7 @@ final class ConfigurableCanAuthorizationPolicy
     if (!allowed) {
       throw PluginPermissionException(
         'CAN subscription $filter is outside the plugin read grant.',
-        pluginId: ownerId,
+        pluginId: _pluginId(ownerId),
         capability: 'can.read',
       );
     }
@@ -90,13 +68,20 @@ final class ConfigurableCanAuthorizationPolicy
 
   @override
   void requireSend(String ownerId, CanFrame frame) {
+    if (frame.isError) {
+      throw PluginPermissionException(
+        'CAN controller error frames cannot be transmitted.',
+        pluginId: _pluginId(ownerId),
+        capability: 'can.write',
+      );
+    }
     final grant = _grants[ownerId];
     final allowed =
         grant?.writeFilters.any((item) => item.matches(frame)) ?? false;
     if (!allowed) {
       throw PluginPermissionException(
         'CAN frame $frame is outside the plugin write grant.',
-        pluginId: ownerId,
+        pluginId: _pluginId(ownerId),
         capability: 'can.write',
       );
     }
@@ -104,7 +89,7 @@ final class ConfigurableCanAuthorizationPolicy
     if (rate <= 0) {
       throw PluginPermissionException(
         'CAN writes are disabled by the plugin rate grant.',
-        pluginId: ownerId,
+        pluginId: _pluginId(ownerId),
         capability: 'can.write',
       );
     }
@@ -117,7 +102,7 @@ final class ConfigurableCanAuthorizationPolicy
     if (times.length >= rate) {
       throw PluginPermissionException(
         'CAN send rate limit of $rate frames/second exceeded.',
-        pluginId: ownerId,
+        pluginId: _pluginId(ownerId),
         capability: 'can.write',
       );
     }
@@ -129,15 +114,17 @@ final class ConfigurableCanAuthorizationPolicy
     _grants.remove(ownerId);
     _sendTimesMicros.remove(ownerId);
   }
+
+  static String _pluginId(String ownerId) => ownerId.split('@').first;
 }
 
 final class CanWriteDisabledException extends PluginPermissionException {
   const CanWriteDisabledException({required String pluginId})
-      : super(
-          'CAN transmission is disabled by the host.',
-          pluginId: pluginId,
-          capability: 'can.write',
-        );
+    : super(
+        'CAN transmission is disabled by the host.',
+        pluginId: pluginId,
+        capability: 'can.write',
+      );
 }
 
 final class CanInjectionResult {
@@ -220,10 +207,7 @@ final class InMemoryCanProvider implements CanProvider {
   }
 
   @override
-  Future<void> send({
-    required String ownerId,
-    required CanFrame frame,
-  }) async {
+  Future<void> send({required String ownerId, required CanFrame frame}) async {
     _ensureOpen();
     _validateOwner(ownerId);
     if (!writesEnabled) {
@@ -318,10 +302,12 @@ final class _InMemoryCanSubscription implements CanSubscription {
     final future = completer.future;
     _drainFuture = future;
     _drain().then(completer.complete, onError: completer.completeError);
-    unawaited(future.whenComplete(() {
-      _drainFuture = null;
-      if (active && _pending.isNotEmpty) _startDrain();
-    }));
+    unawaited(
+      future.whenComplete(() {
+        _drainFuture = null;
+        if (active && _pending.isNotEmpty) _startDrain();
+      }),
+    );
   }
 
   Future<void> _drain() async {

@@ -12,6 +12,7 @@ enum PluginState {
 /// Identifies where an error happened without coupling errors to a Lua runtime.
 enum PluginLifecyclePhase {
   discovery,
+  installation,
   manifestValidation,
   loading,
   initialization,
