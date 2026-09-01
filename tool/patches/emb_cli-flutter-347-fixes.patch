@@ -1,0 +1,305 @@
+From 044589230b2817deb358da6d9e9801f84364ff6e Mon Sep 17 00:00:00 2001
+From: Gabor Peter <peter.gabor04@gmail.com>
+Date: Sun, 30 Aug 2026 21:01:40 +0200
+Subject: [PATCH] Fix source engine staging and Flutter 3.47 AOT builds
+
+---
+ lib/src/aot/aot_builder.dart         | 23 ++++++-
+ lib/src/bundle/bundle_pipeline.dart  | 17 +++++-
+ lib/src/commands/engine_command.dart | 91 ++++++++++++++++++++++++++++
+ lib/src/engine/engine_builder.dart   | 69 +++++++++++++--------
+ 4 files changed, 173 insertions(+), 27 deletions(-)
+
+diff --git a/lib/src/aot/aot_builder.dart b/lib/src/aot/aot_builder.dart
+index 41af6a7..5720649 100644
+--- a/lib/src/aot/aot_builder.dart
++++ b/lib/src/aot/aot_builder.dart
+@@ -265,10 +265,10 @@ class AotBuilder {
+ 
+     final newScheme = File(_frontendServerAot).existsSync();
+     final targetArch = arch ?? host.machineArch;
+-    final gen = genSnapshot ?? await _resolveGenSnapshot(targetArch, modes);
+ 
+     final results = <AotModeResult>[];
+     for (final mode in modes) {
++      final gen = genSnapshot ?? await _resolveGenSnapshot(targetArch, [mode]);
+       onStep?.call('[$mode] flutter build bundle');
+       final bundle = await runProcess(
+         _flutterBin,
+@@ -592,6 +592,27 @@ class AotBuilder {
+     final hostToken = EngineArtifacts.engineArch(host.machineArch);
+     final cross = targetToken != hostToken;
+ 
++    // Native builds should prefer Flutter's mode-specific gen_snapshot.
++    // In particular, linux-x64-release/gen_snapshot is product-configured and
++    // must be paired with a product release engine.
++    if (!cross) {
++      for (final mode in modes) {
++        final modeGen = p.join(
++          workspace.flutterDir.path,
++          'bin',
++          'cache',
++          'artifacts',
++          'engine',
++          '${host.os.configToken}-${host.flutterArch}-$mode',
++          'gen_snapshot',
++        );
++
++        if (File(modeGen).existsSync()) {
++          return modeGen;
++        }
++      }
++    }
++
+     final commit = workspace.engineCommit();
+     if (commit != null) {
+       for (final mode in [...modes, 'release', 'profile', 'debug']) {
+diff --git a/lib/src/bundle/bundle_pipeline.dart b/lib/src/bundle/bundle_pipeline.dart
+index 7a31f1c..83b3e6a 100644
+--- a/lib/src/bundle/bundle_pipeline.dart
++++ b/lib/src/bundle/bundle_pipeline.dart
+@@ -47,7 +47,22 @@ Future<BundleResult> buildAndAssemble({
+     if (commit != null && (!icu.existsSync() || have != want)) {
+       final token = EngineArtifacts.engineArch(arch);
+       onStep?.call('fetching engine ($mode/$token)');
+-      await engine.fetch(runtime: mode, arch: token, commit: commit);
++
++      final fetched = await engine.fetch(
++        runtime: mode,
++        arch: token,
++        commit: commit,
++      );
++
++      if (!fetched.ok) {
++        return BundleResult(
++          success: false,
++          message:
++              fetched.message ??
++              'No usable engine for $mode/$token@$commit. '
++                  'Run `emb engine --arch $token --mode $mode --build-engine`.',
++        );
++      }
+     }
+   }
+ 
+diff --git a/lib/src/commands/engine_command.dart b/lib/src/commands/engine_command.dart
+index 5480852..5312bf6 100644
+--- a/lib/src/commands/engine_command.dart
++++ b/lib/src/commands/engine_command.dart
+@@ -295,6 +295,18 @@ class EngineCommand extends Command<int> {
+     );
+     switch (result.status) {
+       case EngineBuildStatus.cached:
++        if (result.storeRoot == null ||
++            !_stageBuiltEngine(
++              workspace: workspace,
++              storeRoot: result.storeRoot!,
++              commit: commit,
++              arch: arch,
++              mode: mode,
++            )) {
++          progress.fail('Engine $mode: could not stage cached source build');
++          return false;
++        }
++
+         progress.complete(
+           'Engine $mode (cached build) → ${result.storeRoot?.path}',
+         );
+@@ -310,6 +322,17 @@ class EngineCommand extends Command<int> {
+             return false;
+           }
+         }
++        if (result.storeRoot == null ||
++            !_stageBuiltEngine(
++              workspace: workspace,
++              storeRoot: result.storeRoot!,
++              commit: commit,
++              arch: arch,
++              mode: mode,
++            )) {
++          progress.fail('Engine $mode: could not stage source-built engine');
++          return false;
++        }
+         progress.complete(
+           'Engine $mode built from source → ${result.storeRoot?.path}',
+         );
+@@ -403,4 +426,72 @@ class EngineCommand extends Command<int> {
+     }
+     return null;
+   }
++
++  bool _stageBuiltEngine({
++    required Workspace workspace,
++    required Directory storeRoot,
++    required String commit,
++    required String arch,
++    required String mode,
++  }) {
++    final token = EngineArtifacts.engineArch(arch);
++
++    final sdkCandidate = Directory(p.join(storeRoot.path, 'engine-sdk'));
++    final sdkRoot = sdkCandidate.existsSync() ? sdkCandidate : storeRoot;
++
++    final icu = _findFile(sdkRoot, 'icudtl.dat');
++    final engine = _findFile(sdkRoot, 'libflutter_engine.so');
++
++    if (icu == null || engine == null) {
++      return false;
++    }
++
++    final platform = workspace.ensurePlatformDir('flutter-engine');
++
++    final bundleDir = Directory(p.join(platform.path, 'bundle-$mode-$token'));
++
++    if (bundleDir.existsSync()) {
++      bundleDir.deleteSync(recursive: true);
++    }
++
++    final dataDir = Directory(p.join(bundleDir.path, 'data'))
++      ..createSync(recursive: true);
++
++    final libDir = Directory(p.join(bundleDir.path, 'lib'))
++      ..createSync(recursive: true);
++
++    icu.copySync(p.join(dataDir.path, 'icudtl.dat'));
++
++    engine.copySync(p.join(libDir.path, 'libflutter_engine.so'));
++
++    File(p.join(bundleDir.path, EngineArtifacts.bundleStampName))
++        .writeAsStringSync(EngineArtifacts.engineKey(mode, token, commit));
++
++    final commitDir = Directory(p.join(platform.path, commit))
++      ..createSync(recursive: true);
++
++    final sdkLinkPath = p.join(commitDir.path, 'engine-sdk-$mode-$token');
++
++    final existingType = FileSystemEntity.typeSync(
++      sdkLinkPath,
++      followLinks: false,
++    );
++
++    switch (existingType) {
++      case FileSystemEntityType.link:
++        Link(sdkLinkPath).deleteSync();
++      case FileSystemEntityType.directory:
++        Directory(sdkLinkPath).deleteSync(recursive: true);
++      case FileSystemEntityType.file:
++        File(sdkLinkPath).deleteSync();
++      case FileSystemEntityType.notFound:
++      case FileSystemEntityType.pipe:
++      case FileSystemEntityType.unixDomainSock:
++        break;
++    }
++
++    Link(sdkLinkPath).createSync(sdkRoot.path, recursive: true);
++
++    return true;
++  }
+ }
+diff --git a/lib/src/engine/engine_builder.dart b/lib/src/engine/engine_builder.dart
+index 3199d13..a8dd765 100644
+--- a/lib/src/engine/engine_builder.dart
++++ b/lib/src/engine/engine_builder.dart
+@@ -30,24 +30,22 @@ class EngineBuildResult {
+ 
+ /// A single-mode engine build, injectable into `EngineCommand` for testing the
+ /// fetch-else-build dispatch without a real engine build.
+-typedef EngineBuildFn =
+-    Future<EngineBuildResult> Function({
+-      required String commit,
+-      required String arch,
+-      required String mode,
+-      ToolchainProfile profile,
+-      bool offline,
+-      bool strict,
+-    });
++typedef EngineBuildFn = Future<EngineBuildResult> Function({
++  required String commit,
++  required String arch,
++  required String mode,
++  ToolchainProfile profile,
++  bool offline,
++  bool strict,
++});
+ 
+ /// A subprocess runner for the build driver, injectable for tests.
+-typedef EngineProcessRunner =
+-    Future<ProcessResult> Function(
+-      String exe,
+-      List<String> args, {
+-      String? workingDirectory,
+-      Map<String, String>? environment,
+-    });
++typedef EngineProcessRunner = Future<ProcessResult> Function(
++  String exe,
++  List<String> args, {
++  String? workingDirectory,
++  Map<String, String>? environment,
++});
+ 
+ /// Resolves a target sysroot directory (e.g. an Alpine apk musl sysroot),
+ /// injected so the build phase can pass `EMB_SYSROOT_DIR` to the recipe.
+@@ -126,14 +124,35 @@ class EngineBuilder {
+     }
+ 
+     // An offline build must build from a previously fetched closure.
+-    final closure = _store.rootOf(srcKind, commit);
+-    if (wantOffline && !closure.existsSync()) {
+-      return EngineBuildResult(
+-        EngineBuildStatus.unsupported,
+-        message:
+-            'offline build needs the fetch phase first: no engine-src closure '
+-            'for $commit (run `emb engine fetch`)',
++    var closure = _store.rootOf(srcKind, commit);
++
++    if (!closure.existsSync()) {
++      if (wantOffline) {
++        return EngineBuildResult(
++          EngineBuildStatus.unsupported,
++          message:
++              'offline build needs the fetch phase first: no engine-src closure '
++              'for $commit',
++        );
++      }
++
++      final fetched = await fetch(
++        commit: commit,
++        arch: arch,
++        mode: mode,
++        profile: profile,
+       );
++
++      if ((fetched.status != EngineBuildStatus.built &&
++              fetched.status != EngineBuildStatus.cached) ||
++          fetched.storeRoot == null) {
++        return EngineBuildResult(
++          EngineBuildStatus.failed,
++          message: fetched.message ?? 'engine source fetch failed',
++        );
++      }
++
++      closure = fetched.storeRoot!;
+     }
+ 
+     // --offline-strict refuses when real isolation is unavailable, rather than
+@@ -166,7 +185,7 @@ class EngineBuilder {
+     final built =
+         outDir ?? Directory.systemTemp.createTempSync('emb-engine-build-');
+     final baseArgv = [
+-      '/bin/sh',
++      '/bin/bash',
+       _script.path,
+       'build',
+       mode,
+@@ -222,7 +241,7 @@ class EngineBuilder {
+     if (missingScript != null) return missingScript;
+ 
+     final out = Directory.systemTemp.createTempSync('emb-engine-src-');
+-    final result = await _run('/bin/sh', [
++    final result = await _run('/bin/bash', [
+       _script.path,
+       'fetch',
+       mode,
+-- 
+2.43.0
+
