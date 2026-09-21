@@ -26,7 +26,7 @@ security boundary.
 - Provider-side CAN filtering and an in-memory CAN provider for demos/tests.
 - A validated UI model converted to a small allowlisted set of Flutter widgets.
 - Plugin-attributed logs and plugin-scoped in-memory/JSON/SQLite storage.
-- Ed25519-authenticated atomic installation, provenance, and rollback.
+- Ed25519-authenticated staged installation, provenance, and verified rollback.
 - Bounded read-only plugin assets and generic declarative UI extension points.
 - Execution instruction, wall-clock, memory, and timer limits.
 
@@ -240,8 +240,25 @@ change → parse → fresh Lua state → load → initialize → validate
 Diagnostics retain plugin ID, lifecycle phase, source filename, Lua line when
 available, and traceback. Watching is a developer convenience, not a secure
 installer. `PluginInstaller` separately verifies trusted Ed25519 signatures,
-records provenance, stages on the destination filesystem, atomically replaces
-the active directory, and retains a verified rollback version.
+copies a bounded private snapshot on the destination filesystem, then parses and
+verifies that snapshot's manifest, signature and complete payload. Destination ID,
+version, signing-key scope and provenance all use the staged manifest. Source
+mutation after verification cannot change the published package. Copy bounds
+include signature metadata; manifest/signature reads are additionally bounded at
+1 MiB/16 KiB. Unexpected staged files participate in the payload digest.
+
+Symlinked roots, entries and destinations are rejected, with containment checked
+around each copy. These Dart path checks are not descriptor-relative no-follow
+filesystem operations: a hostile concurrent process with write access can still
+race path resolution. Keep the installation root under a trusted owner; arbitrary
+native code or another isolate is not isolated from that owner's filesystem.
+`PluginInstallHooks` is trusted host test instrumentation, never a plugin API.
+
+Replacement uses separate directory renames and retains a verified rollback
+version. It is not an atomic directory exchange or a process-death recovery
+protocol. Installation/rollback serialization, a recovery journal, and complete
+filesystem race hardening remain unfinished; callers must currently use a single
+installation authority and quiesce plugin readers during replacement.
 
 ## Sandbox
 
@@ -394,7 +411,7 @@ For a stripped Debian image:
 - Tabs are the only implemented Flutter extension-point facade. Notifications,
   settings pages, quick controls, and background services are future work.
 - Plugin assets have no host-mediated Lua API yet.
-- There is no signed plugin package/installer or rollback repository.
+- Signed directory installation and local verified rollback are implemented; an authenticated remote package repository is not.
 - The native plugin build currently supports Linux and Windows. Embedded target
   toolchains and `ivi-homescreen` integrations require product-specific build
   and lifecycle testing.

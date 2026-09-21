@@ -163,8 +163,16 @@ final class PluginInstallResult {
   final bool replacedExisting;
 }
 
-/// Authenticates a directory package, stages it on the destination filesystem,
-/// and commits it with an atomic directory rename.
+/// Trusted host instrumentation for deterministic installation tests. Callbacks
+/// run inside the installer and are not a plugin-facing capability.
+final class PluginInstallHooks {
+  const PluginInstallHooks({this.beforeCopyFile, this.afterSnapshot});
+  final Future<void> Function(String relative)? beforeCopyFile;
+  final Future<void> Function(Directory staging)? afterSnapshot;
+}
+
+/// Authenticates a bounded staged snapshot and publishes it by directory rename.
+/// Replacement is not an atomic exchange; callers must quiesce readers.
 final class PluginInstaller {
   PluginInstaller({
     required this.pluginRoot,
@@ -172,8 +180,13 @@ final class PluginInstaller {
     PluginLoader? loader,
     this.requireSignature = true,
     this.maxFiles = 4096,
+    this.hooks = const PluginInstallHooks(),
     this.maxTotalBytes = 128 * 1024 * 1024,
-  }) : loader = loader ?? PluginLoader();
+  }) : loader = loader ?? PluginLoader() {
+    if (maxFiles < 1 || maxTotalBytes < 1) {
+      throw ArgumentError('Package limits must be positive');
+    }
+  }
 
   static const signatureFileName = 'signature.json';
   static const provenanceFileName = '.veloce-provenance.json';
@@ -182,6 +195,7 @@ final class PluginInstaller {
   final PluginSignatureVerifier signatureVerifier;
   final PluginLoader loader;
   final bool requireSignature;
+  final PluginInstallHooks hooks;
   final int maxFiles;
   final int maxTotalBytes;
 
@@ -197,11 +211,26 @@ final class PluginInstaller {
     Directory? prior;
     PluginManifest? manifest;
     try {
-      final candidate = await loader.loadDirectory(packageDirectory);
+      await _requireDirectory(packageDirectory);
+      await pluginRoot.create(recursive: true);
+      await _requireDirectory(pluginRoot);
+      final control = Directory.fromUri(pluginRoot.uri.resolve('.veloce/'));
+      final stagingRoot = Directory.fromUri(control.uri.resolve('staging/'));
+      final rollbackRoot = Directory.fromUri(control.uri.resolve('rollback/'));
+      for (final directory in [control, stagingRoot, rollbackRoot]) {
+        await directory.create();
+        await _requireDirectory(directory);
+      }
+      // Private, unpredictable staging on the destination filesystem. Never
+      // authorize staged bytes from an earlier, mutable source manifest.
+      staging = await stagingRoot.createTemp('snapshot-');
+      await _copyPackage(packageDirectory, staging);
+      await hooks.afterSnapshot?.call(staging);
+      final candidate = await loader.loadDirectory(staging);
       manifest = candidate.manifest;
-      final payload = await _digestDirectory(packageDirectory);
+      final payload = await _digestDirectory(staging);
       final signatureFile = File.fromUri(
-        packageDirectory.uri.resolve(signatureFileName),
+        staging.uri.resolve(signatureFileName),
       );
       PluginSignatureEnvelope? envelope;
       if (await signatureFile.exists()) {
@@ -221,17 +250,8 @@ final class PluginInstaller {
         );
       }
 
-      await pluginRoot.create(recursive: true);
-      final control = Directory.fromUri(pluginRoot.uri.resolve('.veloce/'));
-      final stagingRoot = Directory.fromUri(control.uri.resolve('staging/'));
-      final rollbackRoot = Directory.fromUri(control.uri.resolve('rollback/'));
-      await stagingRoot.create(recursive: true);
-      await rollbackRoot.create(recursive: true);
-      final nonce = '${DateTime.now().microsecondsSinceEpoch}-$pid';
-      staging = Directory.fromUri(
-        stagingRoot.uri.resolve('${manifest.id}-$nonce/'),
-      );
-      await _copyPackage(packageDirectory, staging, payload.files);
+      final nonce =
+          '${DateTime.now().microsecondsSinceEpoch}-${staging.uri.pathSegments.where((part) => part.isNotEmpty).last}';
       final provenance = PluginProvenance(
         pluginId: manifest.id,
         version: manifest.version,
@@ -247,7 +267,17 @@ final class PluginInstaller {
       final target = Directory.fromUri(
         pluginRoot.uri.resolve('${manifest.id}/'),
       );
-      final replaced = await target.exists();
+      final targetType = await FileSystemEntity.type(
+        target.path,
+        followLinks: false,
+      );
+      if (targetType != FileSystemEntityType.notFound &&
+          targetType != FileSystemEntityType.directory) {
+        throw const PluginInstallationException(
+          'Plugin destination must be a real directory.',
+        );
+      }
+      final replaced = targetType == FileSystemEntityType.directory;
       if (replaced) {
         prior = Directory.fromUri(
           rollbackRoot.uri.resolve('${manifest.id}-$nonce/'),
@@ -386,12 +416,27 @@ final class PluginInstaller {
     }
     files.sort((left, right) => left.relative.compareTo(right.relative));
     final records = StringBuffer();
+    var readTotal = 0;
     for (final entry in files) {
-      final fileDigest = await crypto.sha256.bind(entry.file.openRead()).first;
+      var length = 0;
+      final fileDigest = await crypto.sha256
+          .bind(
+            entry.file.openRead().map((chunk) {
+              length += chunk.length;
+              readTotal += chunk.length;
+              if (readTotal > maxTotalBytes) {
+                throw const PluginInstallationException(
+                  'Plugin package exceeds host size limits while hashing.',
+                );
+              }
+              return chunk;
+            }),
+          )
+          .first;
       records
         ..write(entry.relative)
         ..write('\u0000')
-        ..write(entry.length)
+        ..write(length)
         ..write('\u0000')
         ..write(fileDigest)
         ..write('\n');
@@ -403,25 +448,107 @@ final class PluginInstaller {
     );
   }
 
-  static Future<void> _copyPackage(
-    Directory root,
-    Directory destination,
-    List<({File file, String relative, int length})> signedFiles,
-  ) async {
-    await destination.create(recursive: true);
-    final signature = File.fromUri(root.uri.resolve(signatureFileName));
-    final files = [
-      ...signedFiles.map(
-        (entry) => (file: entry.file, relative: entry.relative),
-      ),
-      if (await signature.exists())
-        (file: signature, relative: signatureFileName),
-    ];
-    for (final entry in files) {
-      final target = File.fromUri(destination.uri.resolve(entry.relative));
+  Future<void> _copyPackage(Directory root, Directory destination) async {
+    var count = 0;
+    var total = 0;
+    var entries = 0;
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (++entries > maxFiles * 2) {
+        throw const PluginInstallationException(
+          'Plugin package has too many filesystem entries.',
+        );
+      }
+      final relative = _relativePath(root, entity.path);
+      final type = await FileSystemEntity.type(entity.path, followLinks: false);
+      if (type == FileSystemEntityType.directory) {
+        await _requireContained(root, entity);
+        continue;
+      }
+      if (type != FileSystemEntityType.file) {
+        throw const PluginInstallationException(
+          'Plugin packages require regular files without symbolic links.',
+        );
+      }
+      await _requireContained(root, entity);
+      // Caller-supplied provenance is never installed or trusted.
+      if (relative == provenanceFileName) continue;
+      if (++count > maxFiles) {
+        throw const PluginInstallationException(
+          'Plugin package exceeds host file-count limits.',
+        );
+      }
+      await hooks.beforeCopyFile?.call(relative);
+      await _requireContained(root, entity);
+      if (await FileSystemEntity.type(entity.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        throw const PluginInstallationException(
+          'Plugin source changed file type before copying.',
+        );
+      }
+      final target = File(
+        '${destination.path}${Platform.pathSeparator}$relative',
+      );
       await target.parent.create(recursive: true);
-      await entry.file.copy(target.path);
+      final output = await target.open(mode: FileMode.writeOnly);
+      var fileBytes = 0;
+      try {
+        await for (final chunk in File(entity.path).openRead()) {
+          total += chunk.length;
+          fileBytes += chunk.length;
+          if ((relative == signatureFileName && fileBytes > 16 * 1024) ||
+              (relative == 'manifest.json' && fileBytes > 1024 * 1024)) {
+            throw const PluginInstallationException(
+              'Plugin metadata exceeds host size limits.',
+            );
+          }
+          if (total > maxTotalBytes) {
+            throw const PluginInstallationException(
+              'Plugin package exceeds host size limits while copying.',
+            );
+          }
+          await output.writeFrom(chunk);
+        }
+        await output.flush();
+      } finally {
+        await output.close();
+      }
+      await _requireContained(root, entity);
+      if (await FileSystemEntity.type(entity.path, followLinks: false) !=
+          FileSystemEntityType.file) {
+        throw const PluginInstallationException(
+          'Plugin source changed file type while copying.',
+        );
+      }
     }
+  }
+
+  static Future<void> _requireDirectory(Directory directory) async {
+    if (await FileSystemEntity.type(directory.path, followLinks: false) !=
+        FileSystemEntityType.directory) {
+      throw const PluginInstallationException(
+        'Plugin directory may not be a symbolic link.',
+      );
+    }
+    if (Directory(await directory.resolveSymbolicLinks()).absolute.path !=
+        directory.absolute.path.replaceFirst(RegExp(r'[/\\]+$'), '')) {
+      throw const PluginInstallationException(
+        'Plugin directory path must be canonical and contain no symbolic links.',
+      );
+    }
+  }
+
+  static Future<void> _requireContained(
+    Directory root,
+    FileSystemEntity entity,
+  ) async {
+    final canonical = await entity.resolveSymbolicLinks();
+    final expected = entity.absolute.path.replaceFirst(RegExp(r'[/\\]+$'), '');
+    if (canonical != expected) {
+      throw const PluginInstallationException(
+        'Plugin package path contains a symbolic link.',
+      );
+    }
+    _relativePath(root, canonical);
   }
 
   static String _relativePath(Directory root, String path) {
@@ -437,7 +564,16 @@ final class PluginInstaller {
         filename: path,
       );
     }
-    return absolute.substring(prefix.length).replaceAll('\\', '/');
+    final relative = absolute.substring(prefix.length).replaceAll('\\', '/');
+    if (relative
+            .split('/')
+            .any((part) => part.isEmpty || part == '.' || part == '..') ||
+        relative.contains('\u0000') ||
+        relative.contains('\n') ||
+        relative.contains('\r')) {
+      throw const PluginInstallationException('Invalid plugin package path.');
+    }
+    return relative;
   }
 }
 
